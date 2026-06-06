@@ -5490,9 +5490,9 @@ Response MUST be a JSON object matching this exact format:
                 _save_discovered_selector_to_gui(gui_key, discovered_val)
                 # Update in-memory capture settings so the current loop uses them immediately!
                 if "css_selectors" in capture_settings:
-                    if type_key in ["email", "password", "next", "submit"]:
+                    if type_key in {"email", "password", "next", "submit"}:
                         capture_settings["css_selectors"][type_key] = discovered_val
-                    elif type_key in ["invalid_error_selector", "invalid_inner_html", "invalid_outer_html"]:
+                    elif type_key in {"invalid_error_selector", "invalid_inner_html", "invalid_outer_html"}:
                         # Enable error checks if we discovered a selector
                         window.after(0, lambda: var_invalid_account_enabled.set(True))
                         invalid_account_settings["enable"] = True
@@ -5501,7 +5501,7 @@ Response MUST be a JSON object matching this exact format:
                         else:
                             clean_key = type_key.replace("invalid_", "")
                             invalid_account_settings[clean_key] = discovered_val
-                    elif type_key in ["captcha_error_selector", "captcha_inner_html", "captcha_outer_html"]:
+                    elif type_key in {"captcha_error_selector", "captcha_inner_html", "captcha_outer_html"}:
                         window.after(0, lambda: var_captcha_wrong_enabled.set(True))
                         captcha_wrong_settings["enable"] = True
                         if type_key == "captcha_error_selector":

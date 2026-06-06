@@ -1,0 +1,102 @@
+# ── Output & Results ──────────────────────────────────────────────────────────
+results_*/
+all_results/
+RESULTS/
+output/
+
+# ── Sensitive / Local Data ────────────────────────────────────────────────────
+data/
+media/
+resources/
+INFO/
+
+# ── Deletion Logbook (local only) ────────────────────────────────────────────
+DELETED/
+2026-*/
+
+# ── Logs & Text dumps ────────────────────────────────────────────────────────
+*.log
+*.LOG
+*.txt
+!requirements.txt
+
+# ── Browser Sessions & Profiles ──────────────────────────────────────────────
+temp_sessions/
+session_*/
+_ext_unpacked/
+_ext_test_7z/
+_ext_test_output/
+agent-browser/
+
+# ── Python Bytecode ───────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ── Virtual Environments ─────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── Databases (local runtime state) ──────────────────────────────────────────
+*.db
+*.sqlite3
+
+# ── Scratch / temp / debug files ─────────────────────────────────────────────
+scratch/
+*.tmp
+*.bak
+inspect_rektcaptcha.py
+QHkmCThP.js
+EINPAELG/
+IFIBFEMG/
+KCEGPLGL/
+
+# ── IDE & OS ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Engine registry (machine-specific settings) ───────────────────────────────
+engine/registry/settings.pkl
+engine/registry/settings.pkl.bak
+engine/registry/last_working_model.txt
+engine/registry/discovery_results.db
+
+# ── Chromedriver cache ────────────────────────────────────────────────────────
+chromedriver*.exe
+
+# ── Large binary / dump files ─────────────────────────────────────────────────
+*.exe
+files.txt
+structure.txt
+ERRORS.txt
+_analysis_out.txt
+
+# ── Miscellaneous debug artifacts ─────────────────────────────────────────────
+1+2)())
+check_admin_locator.py
+import_locator_local.py
+run_validator_captured.py
+run_test_cycle.py
+
+# ── Credential files (NEVER commit) ──────────────────────────────────────────
+*_userpass.txt
+*.key
+*.key.pub
+honeygain.txt
+mercadolivre*.txt
+pastebin.com_userpass.txt
+
+# ── Agent / AI orchestration local data ───────────────────────────────────────
+agents/
+discovery_squad/
+ai_captcha/
+configs/
+proxies/
+web-reader/
+web-search/
+web-shader-extractor/

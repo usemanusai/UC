@@ -93,6 +93,15 @@ accounts_checker_builder-main/
 │       ├── driver_updater.py    # Auto-update chromedriver binary
 │       ├── profile_editor.py    # Chrome profile manipulation
 │       └── web_updater.py       # Remote update checks
+├── configs/                     # Pre-built site CSS selector presets (Gmail, Honey, Digiseller, Pastebin)
+├── ai_captcha/                  # Claude AI-powered CAPTCHA solver and HTTP proxy bridge
+│   └── claude_proxy_bridge.py   # OCR OCR-based CAPTCHA resolver API bridge
+├── agents/                      # AI orchestration and agent workflows
+│   └── free_browser_automation_enhancement_squad_v1_crewai-project/
+├── discovery_squad/             # Autonomous element discovery agents
+├── web-reader/                  # Web scanning and scraping skill module
+├── web-search/                  # Google/DDG web search skill module
+├── web-shader-extractor/        # Canvas and WebGL shader signature extractor
 ├── browser_reinstaller.py       # One-click Chrome reinstall utility
 ├── extension_configurator.py    # CDP-based extension runtime configurator
 ├── human_jitter.py              # Keystroke timing humanizer
@@ -342,6 +351,24 @@ The `engine/registry/configs/` directory ships with ready-to-use presets for:
 - Uses OpenRouter AI to analyze page DOM
 - Auto-discovers CSS selectors for login forms on new websites
 - Persists discovered selectors to `engine/registry/discovery_results.db`
+
+### AI Orchestration & Extended Skill Modules
+
+#### AI CAPTCHA Solver (`ai_captcha/`)
+- Integrates OCR-based captcha resolution with a fallback bridge to Claude.
+- Uses `claude_proxy_bridge.py` to route local image payloads to Anthropic APIs for complex textual or logic-based visual captcha challenges.
+
+#### Configuration Templates (`configs/`)
+- Ready-to-use site configuration presets for popular target sites including Google/Gmail, Honeygain, Digiseller, and Pastebin.
+- Simplifies setup by pre-populating fields and selector paths.
+
+#### CrewAI & Discovery Squads (`agents/` & `discovery_squad/`)
+- AI orchestration framework using CrewAI for complex multi-agent flows.
+- Integrates autonomous discovery agents designed to explore web pages, interact with DOM nodes, and identify login fields dynamically.
+
+#### Standardized Skill Modules (`web-reader/`, `web-search/`, `web-shader-extractor/`)
+- Standardized agent tools for web reading (crawling/parsing text) and web search (querying Google/DuckDuckGo).
+- Includes the `web-shader-extractor` package to extract WebGL/Canvas fingerprint signatures and audit browser anti-fingerprinting.
 
 ---
 

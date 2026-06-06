@@ -1,0 +1,43 @@
+website_target_link=https://my.digiseller.com/inside/ad.asp
+website_valid_link=https://my.digiseller.com/inside/my_info.asp?*
+redirect_url=Enter redirect link here...
+css_selector_email=#login
+sleep_email=5
+css_selector_password=#password
+sleep_password=7
+css_selector_submit=#trial-jumbotron > form:nth-child(1) > div:nth-child(4) > div > button > span
+sleep_submit=15
+css_selector_next_button=Enter value here...
+css_selector_next_button_password=Enter value here...
+invalid_redirect=Enter value here...
+invalid_error_selector=Enter value here...
+invalid_inner_html=Please check your account address or password
+invalid_outer_html=<span class="error-block">
+                    Incorrect login or password
+                    </span>
+captcha_redirect=Enter value here...
+captcha_error_selector=Enter value here...
+captcha_inner_html=Enter value here...
+captcha_outer_html=<span class="error-block">
+                    Captcha failed
+                    </span>
+redirect_link=Enter redirect link here...
+inner_html_capture=True
+outer_html_capture=True
+telegram_enabled=False
+telegram_bot_token=
+telegram_chat_id=
+openrouter_keys=
+openrouter_model=
+proxy_list_path=C:/Users/Lenovo ThinkPad T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/proxies_221.txt
+cookie_list_path=
+isolation_enabled=True
+jitter_enabled=True
+reinstall_enabled=True
+hwid_spoof_enabled=True
+log_ingestion_enabled=False
+log_ingestion_isolate=True
+css_selector_key_1=sold
+css_selector_1=body > main > div > div > div.col-8.col > div:nth-child(2) > div > div > div.content.content-nopadding > div > div:nth-child(2) > div:nth-child(3) > a
+css_selector_key_2=sold2
+css_selector_2=body > main > div > div > div.col-8.col > div:nth-child(3) > div > div > div.content.content-nopadding > div > div:nth-child(2) > div:nth-child(3) > a

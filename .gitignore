@@ -19,6 +19,10 @@ DELETED/
 *.LOG
 *.txt
 !requirements.txt
+!engine/registry/configs/*.txt
+!configs/*.txt
+!discovery_squad/knowledge/*.txt
+!agents/free_browser_automation_enhancement_squad_v1_crewai-project/knowledge/*.txt
 
 # ── Browser Sessions & Profiles ──────────────────────────────────────────────
 temp_sessions/
@@ -38,6 +42,7 @@ __pycache__/
 .venv/
 venv/
 env/
+node_modules/
 
 # ── Databases (local runtime state) ──────────────────────────────────────────
 *.db
@@ -92,11 +97,4 @@ mercadolivre*.txt
 pastebin.com_userpass.txt
 
 # ── Agent / AI orchestration local data ───────────────────────────────────────
-agents/
-discovery_squad/
-ai_captcha/
-configs/
-proxies/
-web-reader/
-web-search/
-web-shader-extractor/
+

@@ -21,6 +21,7 @@
   - [5. Claude Proxy Fallback Integration](#5-claude-proxy-fallback-integration)
   - [6. Telegram Reporting Subsystem](#6-telegram-reporting-subsystem)
   - [7. Tab Monitoring & Port Scan Daemon](#7-tab-monitoring--port-scan-daemon)
+  - [8. AI Orchestration & Extended Skill Modules](#8-ai-orchestration--extended-skill-modules)
 - [Extensions & Solvers](#extensions--solvers)
 - [Proxy Support](#proxy-support)
 - [Results & Output](#results--output)
@@ -360,6 +361,249 @@ Located in `tab_monitor.py`, this utility runs alongside the checker to monitor 
 
 - **Brute-Force Scanner**: Scans localhost ports (10000–20000) in chunks of 500. It queries `/json/version` to locate active Chrome CDP ports.
 - **Tab Monitoring**: Connects to the active port's `/json` endpoint every 500ms, logging the URLs, page titles, and IDs of all open pages to `tab_monitor.log`.
+
+---
+
+### 8. AI Orchestration & Extended Skill Modules
+
+This section covers the auxiliary modules, prebuilt configs, and advanced agentic features packed into UC.
+
+#### A. AI CAPTCHA Solver (`ai_captcha/`)
+- **OCR-based Resolution**: Integrates locally executed OCR-based CAPTCHA solving modules.
+- **Claude Proxy Bridge**: Uses `claude_proxy_bridge.py` to route visual/textual CAPTCHAs to Anthropic models, matching API payloads to local endpoints, verifying server health via `/health`, and caching results in `ocr_results.txt` to minimize API costs.
+
+#### B. Configuration Templates (`configs/`)
+- **Prebuilt Target Presets**: Ready-to-use site configuration presets for popular target platforms.
+- **Prebuilt Configs Included**:
+  - `gmail_config.txt`: Configured for Google/Gmail accounts.
+  - `honey_config.txt`: Configured for Honey extension logins.
+  - `my_digiseller_com.txt`: Configured for Digiseller.
+  - `pastebin_config.txt`: Configured for Pastebin.
+
+#### C. CrewAI & Discovery Squads (`agents/` & `discovery_squad/`)
+- **Autonomous Discovery**: Orchestrates agent squads using CrewAI to scrape pages, explore DOM trees, and identify form selectors.
+- **Rust Agent-Browser Execution**: Employs a custom headed/headless Chromium-based discovery loop that performs multi-phase execution (commands, snapshots, JS queries) to systematically find elements on high-security pages.
+
+#### D. Standardized Skill Modules
+
+##### I. Web Reader Module (`web-reader/`)
+The Web Reader module extracts, parses, and formats content from any URL using the `page_reader` function from `jaegis-sdk`. It is used exclusively in backend applications.
+
+###### 1. CLI Usage
+For quick scraping tasks, you can query pages directly from the command line:
+```bash
+# Basic content extraction
+jaegis function --name "page_reader" --args '{"url": "https://example.com"}'
+
+# Export content directly to a JSON file
+jaegis function -n page_reader -a '{"url": "https://example.com/article"}' -o page_content.json
+```
+CLI parameters include:
+- `--name, -n` (Required): Function name, set to `"page_reader"`.
+- `--args, -a` (Required): JSON arguments object containing `"url"`.
+- `--output, -o` (Optional): Target JSON output path.
+
+###### 2. Response Fields & Structures
+The resulting JSON response contains the following data structure:
+```typescript
+{
+  title: string;           // Extracted page title
+  url: string;             // Original parsed URL
+  html: string;            // Cleaned main article content HTML
+  publishedTime?: string;  // Publication date (if found)
+  text?: string;           // Optional plain text translation
+  metadata: {              // Extended metadata object
+    author?: string;
+    description?: string;
+    keywords?: string[];
+  }
+}
+```
+
+###### 3. SDK Integration Examples
+**Basic Page Scraping:**
+```javascript
+import JAEGIS from 'jaegis-sdk';
+
+async function readWebPage(url) {
+  const zai = await JAEGIS.create();
+  const result = await zai.functions.invoke('page_reader', { url });
+  console.log('Title:', result.data.title);
+  console.log('HTML Content:', result.data.html);
+  return result.data;
+}
+```
+
+**Advanced Web Content Analyzer (with Caching & Word Estimation):**
+```javascript
+import JAEGIS from 'jaegis-sdk';
+
+class WebContentAnalyzer {
+  constructor() {
+    this.cache = new Map();
+  }
+
+  async initialize() {
+    this.zai = await JAEGIS.create();
+  }
+
+  async readPage(url, useCache = true) {
+    if (useCache && this.cache.has(url)) {
+      return this.cache.get(url);
+    }
+    const result = await this.zai.functions.invoke('page_reader', { url });
+    if (useCache) this.cache.set(url, result.data);
+    return result.data;
+  }
+
+  estimateWordCount(html) {
+    const text = html.replace(/<[^>]*>/g, ' ');
+    return text.split(/\s+/).filter(word => word.length > 0).length;
+  }
+}
+```
+
+**Express.js API Endpoint Integration:**
+```javascript
+import express from 'express';
+import JAEGIS from 'jaegis-sdk';
+
+const app = express();
+app.use(express.json());
+let zai;
+
+app.post('/api/read-page', async (req, res) => {
+  try {
+    const { url } = req.body;
+    const result = await zai.functions.invoke('page_reader', { url });
+    res.json({ success: true, data: result.data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+```
+
+###### 4. Best Practices & Security
+- **Backend Lock**: The module must never run on client-side environments to protect API configurations.
+- **Rate Limiting**: Implement exponential backoff or scheduling wrappers (like `node-cron`) to throttle high-volume scraping loops.
+- **HTML Sanitization**: Always sanitize extracted raw HTML content before displaying it in your UI to prevent Cross-Site Scripting (XSS).
+
+---
+
+##### II. Web Search Module (`web-search/`)
+The Web Search module queries the web for real-time information, returning structured results with metadata. It utilizes the `web_search` function.
+
+###### 1. CLI Usage
+```bash
+# Basic keyword search
+jaegis function --name "web_search" --args '{"query": "latest news"}'
+
+# Search with custom constraints (number of results, recency filtering)
+jaegis function -n web_search -a '{"query": "AI research", "num": 5, "recency_days": 7}' -o results.json
+```
+CLI arguments inside `--args`:
+- `query` (string, required): Keyword query.
+- `num` (number, optional): Result limit count (defaults to 10).
+- `recency_days` (number, optional): Recency filter.
+
+###### 2. Response Structure
+Each search result maps to the following TypeScript interface:
+```typescript
+interface SearchFunctionResultItem {
+  url: string;          // Full URL of the result
+  name: string;         // Page title
+  snippet: string;      // Preview text description
+  host_name: string;    // Domain name
+  rank: number;         // Result position rank
+  date: string;         // Publication/update date
+  favicon: string;      // Favicon URL
+}
+```
+
+###### 3. SDK Integration Examples
+**Basic Search:**
+```javascript
+import JAEGIS from 'jaegis-sdk';
+
+async function searchWeb(query) {
+  const zai = await JAEGIS.create();
+  const results = await zai.functions.invoke('web_search', { query, num: 10 });
+  return results; // Array of SearchFunctionResultItem
+}
+```
+
+**Advanced Search & Summarize (with AI completions):**
+```javascript
+import JAEGIS from 'jaegis-sdk';
+
+async function searchAndSummarize(query) {
+  const zai = await JAEGIS.create();
+  const searchResults = await zai.functions.invoke('web_search', { query, num: 10 });
+
+  const context = searchResults
+    .slice(0, 5)
+    .map((r, i) => `${i + 1}. ${r.name}\n${r.snippet}`)
+    .join('\n\n');
+
+  const completion = await zai.chat.completions.create({
+    messages: [
+      { role: 'assistant', content: 'Summarize the search results clearly.' },
+      { role: 'user', content: `Query: "${query}"\n\nResults:\n${context}` }
+    ],
+    thinking: { type: 'disabled' }
+  });
+
+  return {
+    query,
+    summary: completion.choices[0]?.message?.content,
+    sources: searchResults.slice(0, 5).map(r => ({ title: r.name, url: r.url }))
+  };
+}
+```
+
+**Express.js Search API Endpoint:**
+```javascript
+app.get('/api/search', async (req, res) => {
+  try {
+    const { q, num = 10 } = req.query;
+    const results = await zai.functions.invoke('web_search', { query: q, num: parseInt(num) });
+    res.json({ success: true, results });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+```
+
+---
+
+##### III. Web Shader Extractor (`web-shader-extractor/`)
+The Web Shader Extractor is designed to analyze, extract, and de-obfuscate WebGL/Canvas shader visual effects from webpages and port them into standalone JS applications.
+
+###### 1. Core Principles
+- **1:1 Replication**: Verify correct visual and functional behavior before refactoring or simplifying.
+- **Autonomous Pipeline**: All extraction phases run strictly unattended except for user product decisions in Phase 6.
+
+###### 2. Detailed 7-Phase Workflow
+1. **Phase 0: Environment Precheck**: Verifies the presence of Node.js and automatically downloads Playwright Chromium dependencies using mirror proxies if needed.
+2. **Phase 1: Source Code Fetching**: Launches a headless Playwright instance alongside standard `curl` fetches to capture DOM snapshots (`dom.html`), active canvas metadata (`canvas-info.json`), network logs (`network.json`), console outputs, and screenshots.
+3. **Phase 2: Tech Stack Recognition**: Inspects `canvas-info.json` to identify the rendering framework:
+   - Three.js (including checking for TSL - Three Shading Language, in r170+)
+   - Babylon.js
+   - Raw WebGL (looking for `createShader`, `shaderSource` inside JS bundle)
+   - 2D Canvas (fallback to plain 2D rendering if WebGL functions are absent)
+4. **Phase 3: Configuration Extraction**: Extracts JSON parameters, Nuxt/Next payload structures (`__NEXT_DATA__`), and default JS parameters.
+5. **Phase 4: Shader Extraction & De-obfuscation**: Employs an agent-driven de-obfuscator to scan JavaScript bundles, extract GLSL structures, clean math expressions, and format variable tags.
+6. **Phase 5: Porting**: Builds a standalone HTML/JS project using a unified importmap structure:
+   - For全屏2D effects: ports directly to zero-dependency raw WebGL2.
+   - For 3D/PBR scenes: maintains original framework references via CDN scripts.
+7. **Phase 6: Simplification & Verification**: Executes a local browser test to take screenshots and compare rendering. Suggests framework simplification to the user.
+8. **Phase 7: Report Generation**: Generates an exhaustive `EXTRACTION-REPORT.md` compiling timeline, scene graphs, render passes, and key lessons.
+
+###### 3. Framework & Technical Reference Index
+The extractor maintains a library of signatures and patterns for known platforms:
+- **Unicorn Studio**: Curtains.js extraction via Firestore REST configs.
+- **shaders.com**: TSL-to-GLSL translation, XOR payload decoding, and Y-flip coordinate normalization.
+- **Three.js TSL**: Rebuilds nodes programmatically.
 
 ---
 

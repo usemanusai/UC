@@ -12,6 +12,7 @@ Typed adapter between the AI discovery pipeline and the Tkinter GUI.
 ``run_and_validate_cached`` wraps ``run_and_validate`` with an optional
 SQLite cache so repeated runs against the same URL skip the AI call.
 """
+
 from __future__ import annotations
 
 import json
@@ -20,7 +21,7 @@ import os
 import re
 import sqlite3
 import time
-from typing import Callable, List, Optional
+from typing import Callable, Dict, List, Optional, Union
 
 from engine.core.discovery_schema import (
     DiscoveryResult,
@@ -32,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 # ── AI Query Helper ──────────────────────────────────────────────────────────
+
 
 def _ask_ai(
     prompt: str,
@@ -51,7 +53,9 @@ def _ask_ai(
     if claude_proxy_enabled and claude_proxy_url:
         try:
             url = claude_proxy_url
-            if not url.endswith("/chat/completions") and not url.endswith("/v1/chat/completions"):
+            if not url.endswith("/chat/completions") and not url.endswith(
+                "/v1/chat/completions"
+            ):
                 url = url.rstrip("/") + "/v1/chat/completions"
 
             headers = {"Content-Type": "application/json"}
@@ -86,7 +90,8 @@ def _ask_ai(
                 "X-Title": "Universal Checker",
             }
             payload = {
-                "model": preferred_model or "google/gemini-2.0-flash-lite-preview-02-05:free",
+                "model": preferred_model
+                or "google/gemini-2.0-flash-lite-preview-02-05:free",
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.1,
                 "response_format": {"type": "json_object"},
@@ -101,7 +106,9 @@ def _ask_ai(
                     content = content.split("```")[1].split("```")[0].strip()
                 return json.loads(content.strip())
             else:
-                errors.append(f"OpenRouter {response.status_code}: {response.text[:200]}")
+                errors.append(
+                    f"OpenRouter {response.status_code}: {response.text[:200]}"
+                )
         except Exception as e:
             errors.append(str(e))
 
@@ -109,6 +116,7 @@ def _ask_ai(
 
 
 # ── HTML Fetcher ─────────────────────────────────────────────────────────────
+
 
 def _fetch_page_html(target_url: str, log_callback: Callable) -> str:
     """
@@ -127,13 +135,19 @@ def _fetch_page_html(target_url: str, log_callback: Callable) -> str:
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
         }
-        resp = requests.get(target_url, headers=headers, timeout=30, allow_redirects=True)
+        resp = requests.get(
+            target_url, headers=headers, timeout=30, allow_redirects=True
+        )
         resp.raise_for_status()
         html = resp.text
-        log_callback(f"[Bridge] Fetched {len(html)} chars of HTML (status {resp.status_code}).")
+        log_callback(
+            f"[Bridge] Fetched {len(html)} chars of HTML (status {resp.status_code})."
+        )
         return html
     except Exception as e:
-        log_callback(f"[Bridge] HTML fetch failed: {e}. AI will work from URL context only.")
+        log_callback(
+            f"[Bridge] HTML fetch failed: {e}. AI will work from URL context only."
+        )
         return ""
 
 
@@ -145,9 +159,7 @@ def _extract_dom_elements(html: str) -> list:
     elements = []
 
     # Extract <input> elements
-    for m in re.finditer(
-        r'<input\b([^>]*)/?>', html, re.IGNORECASE | re.DOTALL
-    ):
+    for m in re.finditer(r"<input\b([^>]*)/?>", html, re.IGNORECASE | re.DOTALL):
         attrs = m.group(1)
         el = {
             "tag": "INPUT",
@@ -162,10 +174,10 @@ def _extract_dom_elements(html: str) -> list:
 
     # Extract <button> elements
     for m in re.finditer(
-        r'<button\b([^>]*)>(.*?)</button>', html, re.IGNORECASE | re.DOTALL
+        r"<button\b([^>]*)>(.*?)</button>", html, re.IGNORECASE | re.DOTALL
     ):
         attrs = m.group(1)
-        inner = re.sub(r'<[^>]+>', '', m.group(2)).strip()[:100]
+        inner = re.sub(r"<[^>]+>", "", m.group(2)).strip()[:100]
         el = {
             "tag": "BUTTON",
             "id": _extract_attr(attrs, "id"),
@@ -178,14 +190,12 @@ def _extract_dom_elements(html: str) -> list:
         elements.append(el)
 
     # Extract <a> elements that look like buttons (role="button" or class contains "btn")
-    for m in re.finditer(
-        r'<a\b([^>]*)>(.*?)</a>', html, re.IGNORECASE | re.DOTALL
-    ):
+    for m in re.finditer(r"<a\b([^>]*)>(.*?)</a>", html, re.IGNORECASE | re.DOTALL):
         attrs = m.group(1)
         cls = _extract_attr(attrs, "class") or ""
         role = _extract_attr(attrs, "role") or ""
         if "btn" in cls.lower() or "button" in cls.lower() or role.lower() == "button":
-            inner = re.sub(r'<[^>]+>', '', m.group(2)).strip()[:100]
+            inner = re.sub(r"<[^>]+>", "", m.group(2)).strip()[:100]
             el = {
                 "tag": "A",
                 "id": _extract_attr(attrs, "id"),
@@ -197,9 +207,7 @@ def _extract_dom_elements(html: str) -> list:
             elements.append(el)
 
     # Extract <form> elements
-    for m in re.finditer(
-        r'<form\b([^>]*)>', html, re.IGNORECASE | re.DOTALL
-    ):
+    for m in re.finditer(r"<form\b([^>]*)>", html, re.IGNORECASE | re.DOTALL):
         attrs = m.group(1)
         el = {
             "tag": "FORM",
@@ -212,9 +220,7 @@ def _extract_dom_elements(html: str) -> list:
         elements.append(el)
 
     # Extract <select> elements
-    for m in re.finditer(
-        r'<select\b([^>]*)>', html, re.IGNORECASE | re.DOTALL
-    ):
+    for m in re.finditer(r"<select\b([^>]*)>", html, re.IGNORECASE | re.DOTALL):
         attrs = m.group(1)
         el = {
             "tag": "SELECT",
@@ -227,12 +233,12 @@ def _extract_dom_elements(html: str) -> list:
 
     # Extract potential error containers (divs/spans with error-related classes/ids)
     error_pattern = re.compile(
-        r'<(?:div|span|p|label|section)\b([^>]*(?:error|alert|danger|warning|invalid|captcha|fail|wrong|incorrect)[^>]*)>(.*?)</(?:div|span|p|label|section)>',
+        r"<(?:div|span|p|label|section)\b([^>]*(?:error|alert|danger|warning|invalid|captcha|fail|wrong|incorrect)[^>]*)>(.*?)</(?:div|span|p|label|section)>",
         re.IGNORECASE | re.DOTALL,
     )
     for m in error_pattern.finditer(html):
         attrs = m.group(1)
-        inner = re.sub(r'<[^>]+>', '', m.group(2)).strip()[:200]
+        inner = re.sub(r"<[^>]+>", "", m.group(2)).strip()[:200]
         el = {
             "tag": "ERROR_CONTAINER",
             "id": _extract_attr(attrs, "id"),
@@ -309,6 +315,7 @@ Return ONLY the JSON object, no markdown, no explanation.
 
 # ── Main Discovery Functions ─────────────────────────────────────────────────
 
+
 def run_and_validate(
     target_url: str,
     api_keys: List[str],
@@ -353,6 +360,7 @@ def run_and_validate(
     RuntimeError
         If the AI query fails entirely.
     """
+
     def _safe_log(msg: str) -> None:
         if log_callback:
             try:
@@ -372,10 +380,15 @@ def run_and_validate(
 
     # If we couldn't extract any elements from HTML, provide URL context only
     if not dom_elements:
-        dom_elements_json = json.dumps([{
-            "tag": "NOTE",
-            "text": "Could not fetch page HTML. Please analyze the URL pattern and common login form structures for this domain."
-        }], indent=2)
+        dom_elements_json = json.dumps(
+            [
+                {
+                    "tag": "NOTE",
+                    "text": "Could not fetch page HTML. Please analyze the URL pattern and common login form structures for this domain.",
+                }
+            ],
+            indent=2,
+        )
     else:
         dom_elements_json = json.dumps(dom_elements, indent=2)
 
@@ -438,7 +451,9 @@ def run_and_validate_cached(
             cached = _load_from_cache(target_url)
             if cached is not None:
                 if log_callback:
-                    log_callback(f"[Bridge] Loaded cached discovery result for {target_url}")
+                    log_callback(
+                        f"[Bridge] Loaded cached discovery result for {target_url}"
+                    )
                 return cached
         except Exception as e:
             logger.warning("[Bridge] Cache read failed: %s", e)
@@ -469,9 +484,12 @@ def run_and_validate_cached(
 
 # ── SQLite Cache ─────────────────────────────────────────────────────────────
 
+
 def _get_cache_db_path() -> str:
     """Return the path to the discovery cache database."""
-    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    base_dir = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    )
     registry_dir = os.path.join(base_dir, "engine", "registry")
     os.makedirs(registry_dir, exist_ok=True)
     return os.path.join(registry_dir, "discovery_results.db")
@@ -523,18 +541,38 @@ def _load_from_cache(target_url: str) -> Optional[DiscoveryResult]:
         conn.close()
 
 
-def _save_to_cache(target_url: str, result: DiscoveryResult) -> None:
-    """Save a discovery result to the SQLite cache."""
+def _save_to_cache(
+    target_url: Union[str, Dict[str, DiscoveryResult]],
+    result: Optional[DiscoveryResult] = None,
+) -> None:
+    """Save one or more discovery results to the SQLite cache."""
     db_path = _get_cache_db_path()
     conn = sqlite3.connect(db_path, timeout=5)
     try:
         _ensure_cache_table(conn)
-        result_dict = result.to_gui_dict()
-        conn.execute(
-            """INSERT OR REPLACE INTO discovery_cache (url, result_json, created_at)
-               VALUES (?, ?, ?)""",
-            (target_url, json.dumps(result_dict), time.time()),
-        )
+
+        if isinstance(target_url, dict):
+            now = time.time()
+            data = [
+                (url, json.dumps(res.to_gui_dict()), now)
+                for url, res in target_url.items()
+            ]
+            conn.executemany(
+                """INSERT OR REPLACE INTO discovery_cache (url, result_json, created_at)
+                   VALUES (?, ?, ?)""",
+                data,
+            )
+        else:
+            if result is None:
+                raise ValueError(
+                    "result must be provided when saving a single target_url"
+                )
+            result_dict = result.to_gui_dict()
+            conn.execute(
+                """INSERT OR REPLACE INTO discovery_cache (url, result_json, created_at)
+                   VALUES (?, ?, ?)""",
+                (target_url, json.dumps(result_dict), time.time()),
+            )
         conn.commit()
     finally:
         conn.close()

@@ -776,7 +776,10 @@ def _launch_chrome_with_timeout(fresh_options, headless, use_subprocess, version
                                                         _local_cd_version_ok = True
                                                         _print_log(f"Local chromedriver v{_cd_major} matches Chrome v{_chrome_major}.")
                                                     else:
-                                                        _print_log(f"Local chromedriver v{_cd_major} does NOT match Chrome v{_chrome_major}. Skipping.", "WARNING")
+                                                        if _chrome_major is None:
+                                                            _print_log(f"Local chromedriver v{_cd_major} does NOT match (Chrome version undetected). Skipping.", "WARNING")
+                                                        else:
+                                                            _print_log(f"Local chromedriver v{_cd_major} does NOT match Chrome v{_chrome_major}. Skipping.", "WARNING")
                                 except Exception as test_e:
                                     _print_log(f"Verification of local chromedriver failed: {test_e}. Bypassing.", "WARNING")
 

@@ -664,26 +664,6 @@ Each run creates a timestamped results directory containing:
 
 ## Changelog
 
-### 2026-06-06 — Auto-Save Inputs & Rust Browser Discovery Stabilized
-- **Auto-Save on Keystroke**: Bound `<KeyRelease>` and `<FocusOut>` events to all Tkinter Entry and Text widgets (including target/valid URLs, CSS selectors, sleep durations, and accounts list) to auto-save settings debounced (1.5 seconds) so that no input values are lost on restart or crash.
-- **Rust Agent-Browser Fix**: Solved the hang on the target website by dividing the discovery loop into three clean phases (Phase A: action commands execution, Phase B: JSON-formatted snapshot retrieval via `snapshot -i`, and Phase C: DOM element extraction using JS query evaluation). Replaced inline command structures with the standard chained commands `&&` execution and added proper timeouts (120s/30s) to subprocess calls to prevent infinite hangs.
-
-### 2026-05-28 — Buster Removed, rektCaptcha Stabilized
-- **REMOVED** Buster extension entirely (caused 20-30s hangs on every CAPTCHA, never worked reliably)
-- **KEPT** rektCaptcha, Moodle, Shaparak solvers
-- rektCaptcha `background.js` patched on every CRX unpack: `auto_open=ON`, `auto_solve=ON`
-- CDPSweep: never closes `chrome-extension://` URLs (protects solver extension tabs)
-
-### 2026-05-28 — Browser Crash & Subprocess Fix
-- **FIXED** `UnboundLocalError: cannot access free variable 'subprocess'` in `browser_factory.py`
-- **FIXED** zombie Chrome processes locking profiles across retry attempts
-- Added `_kill_chrome_processes_for_profile()` + `_unlock_profile()` between retry attempts
-
-### 2026-05-27 — Extension Loading & Toolbar Pinning
-- Extensions now auto-unpack CRX → `_ext_unpacked/` on first run
-- Developer Mode auto-enable via shadow DOM JS after each browser launch
-- rektCaptcha source-patch approach replacing unreliable CDP runtime injection
-
 ---
 
 ## License

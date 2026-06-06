@@ -91,8 +91,8 @@ def _find_chrome_binary() -> Optional[str]:
     PRIORITY ORDER (2026-06-04 FIX):
       1. REAL Chrome (stable/dev/beta) — the version users actually have.
          Chromedriver is always available for stable Chrome via Selenium Manager.
-      2. Playwright Chromium — LAST RESORT only. Its version (e.g. 143) is
-         typically far behind the user's real Chrome (e.g. 148), causing
+      2. Playwright Chromium — LAST RESORT only. Its version is
+         typically far behind the user's real Chrome, causing
          chromedriver mismatches and session-not-created errors.
     
     Returns the absolute path to the Chrome executable, or None.
@@ -729,11 +729,11 @@ def _launch_chrome_with_timeout(fresh_options, headless, use_subprocess, version
                     driver_exe = None
                     with _chromedriver_cache_lock:
                         # 2026-06-04 FIX: We no longer have a special "Playwright Chromium"
-                        # path that picks chromedriver143.exe from the workspace root.
+                        # path that picks a hardcoded older version of chromedriver from the workspace root.
                         # Instead we ALWAYS let Selenium Manager resolve the correct
                         # chromedriver matching the ACTUAL Chrome binary we launched.
-                        # This prevents the #1 failure mode: chromedriver v143 trying
-                        # to control Chrome v148 → session-not-created.
+                        # This prevents the #1 failure mode: an older chromedriver version trying
+                        # to control a newer Chrome version → session-not-created.
                         if _cached_chromedriver_path and os.path.isfile(_cached_chromedriver_path):
                             driver_exe = _cached_chromedriver_path
                             _print_log(f"Using cached chromedriver: {driver_exe}")
@@ -766,7 +766,7 @@ def _launch_chrome_with_timeout(fresh_options, headless, use_subprocess, version
                                             )
                                             _is_valid_win = True
                                             # 2026-06-04 FIX: Also verify major version matches Chrome.
-                                            # A workspace chromedriver v143 cannot control Chrome v148.
+                                            # A workspace older chromedriver version cannot control a newer Chrome version.
                                             if res.returncode == 0 and res.stdout.strip():
                                                 _cd_ver_match = re.search(r'(\d+)\.', res.stdout.strip())
                                                 if _cd_ver_match:

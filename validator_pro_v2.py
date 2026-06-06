@@ -33,6 +33,7 @@ import re
 import random
 import threading
 import getpass
+from engine.reporting.csv_exporter import SQLiteCSVExporter
 from datetime import datetime
 import json
 import webbrowser
@@ -7078,6 +7079,27 @@ def export_config():
                 "Export Error", f"An error occurred while exporting config: {e}"
             )
 
+def export_db_to_csv():
+    """Exports the checked_accounts.db SQLite database to CSV format."""
+    file_path = filedialog.asksaveasfilename(
+        initialdir=os.getcwd(),
+        defaultextension=".csv",
+        filetypes=(("CSV Files", "*.csv"),),
+        title="Export Database to CSV",
+    )
+    if file_path:
+        success = SQLiteCSVExporter.export_table_to_csv(db_name, "accounts", file_path)
+        if success:
+            messagebox.showinfo(
+                "Export Successful",
+                f"Database successfully exported to {file_path}",
+            )
+        else:
+            messagebox.showerror(
+                "Export Error",
+                "Failed to export database to CSV. Check logs or verify database contains data.",
+            )
+
 
 def save_config_state():
     """Saves the current state of the config to a file."""
@@ -10438,18 +10460,25 @@ CreateToolTip(frame_config.children["!button3"], "Export the current configurati
 
 ttk.Button(
     frame_config,
+    text="Export DB to CSV",
+    command=export_db_to_csv,
+).grid(column=0, row=3, padx=10, pady=5, sticky="w")
+CreateToolTip(frame_config.children["!button4"], "Export validation database to CSV.")
+
+ttk.Button(
+    frame_config,
     text="Save Config State",
     command=save_config_state,
-).grid(column=0, row=3, padx=10, pady=5, sticky="w")
-CreateToolTip(frame_config.children["!button4"], "Save the current configuration state.")
+).grid(column=0, row=4, padx=10, pady=5, sticky="w")
+CreateToolTip(frame_config.children["!button5"], "Save the current configuration state.")
 
 ttk.Button(
     frame_config,
     text="Reset to Default",
     command=reset_to_default,
-).grid(column=0, row=4, padx=10, pady=5, sticky="w")
+).grid(column=0, row=5, padx=10, pady=5, sticky="w")
 CreateToolTip(
-    frame_config.children["!button5"], "Reset all settings to their default values."
+    frame_config.children["!button6"], "Reset all settings to their default values."
 )
 
 # -------------------

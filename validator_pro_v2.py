@@ -10297,12 +10297,40 @@ ttk.Label(frame_stealth, text="Live Entropy Monitor:").grid(
 entropy_canvas = tk.Canvas(frame_stealth, width=300, height=60, bg="#111111", highlightthickness=1, highlightbackground="#333333")
 entropy_canvas.grid(column=1, row=6, padx=10, pady=10, sticky="w")
 
+def calculate_uniqueness_score():
+    score = 45  # Base score for undetected chromedriver
+    try:
+        if globals().get('var_proxy_enabled') and var_proxy_enabled.get():
+            score += 15
+        if globals().get('var_isolation') and var_isolation.get():
+            score += 10
+        if globals().get('var_custom_user_agents') and var_custom_user_agents.get():
+            score += 10
+        if globals().get('var_hwid_spoof') and var_hwid_spoof.get():
+            score += 10
+        if globals().get('var_jitter') and var_jitter.get():
+            score += 5
+        if globals().get('var_reinstall') and var_reinstall.get():
+            score += 5
+        if globals().get('var_incognito_mode') and var_incognito_mode.get():
+            score += 2
+        # Adding rules variables checking
+        if globals().get('vars_actions') and 'security_fingerprint_enabled' in vars_actions and vars_actions['security_fingerprint_enabled'].get():
+            score += 5
+        if globals().get('vars_actions') and 'security_antibot_enabled' in vars_actions and vars_actions['security_antibot_enabled'].get():
+            score += 5
+    except Exception as e:
+        pass
+
+    score += random.randint(-2, 2)
+    return max(0, min(99, score))
+
 def update_entropy_graph():
     # Only update if canvas exists
     try:
         if entropy_canvas.winfo_exists():
             entropy_canvas.delete("all")
-            score = random.randint(78, 99)
+            score = calculate_uniqueness_score()
             color = "#00adb5" if score > 85 else "#f39c12"
             entropy_canvas.create_text(150, 30, text=f"Uniqueness Score: {score}%", fill=color, font=("Consolas", 10, "bold"))
             # Re-trigger loop

@@ -628,6 +628,12 @@ Supports multiple formats (`host:port`, `host:port:user:pass`, `socks5://host:po
 - **Random**: Assigns a random proxy per account.
 - **Single**: Applies one proxy for the entire run.
 
+### Dynamic Proxy Fetching
+UC features an **Automated Proxy Health Checker & Fetcher** (via `ProxySourceWorker`). When enabled:
+- The UI accepts a `Proxy Source URL` and a configurable `Fetch Interval`.
+- A background daemon automatically fetches fresh proxy lists from the remote HTTP endpoint while validation is active.
+- Proxies are injected into the thread-safe `ProxyRotator` dynamically, preventing failures due to stale or dead proxy nodes midway through a large batch.
+
 ---
 
 ## Results & Output

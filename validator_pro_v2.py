@@ -8458,7 +8458,7 @@ def handle_auto_discovery():
             i = 0
             while i < len(clean_args):
                 arg = clean_args[i]
-                if arg in ["--session", "--timeout", "--cdp", "--extension"]:
+                if arg in {"--session", "--timeout", "--cdp", "--extension"}:
                     # These take a value
                     if i + 1 < len(clean_args):
                         global_flags.append(arg)
@@ -8467,7 +8467,7 @@ def handle_auto_discovery():
                     else:
                         global_flags.append(arg)
                         i += 1
-                elif arg in ["--headed", "--headless", "--json", "--full"]:
+                elif arg in {"--headed", "--headless", "--json", "--full"}:
                     # These are standalone global flags
                     global_flags.append(arg)
                     i += 1

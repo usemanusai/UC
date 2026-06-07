@@ -459,10 +459,29 @@ def _kill_chrome_processes_for_profile(user_data_dir: str):
             _print_log(f"Process check/kill failed: {e}", "WARNING")
             _print_log("Continuing with launch attempt anyway.")
     else:
-        # Linux/macOS: match cmdline processes
+        # Linux/macOS: match cmdline processes safely
         try:
-            ps_cmd = f"ps -ef | grep -i '{abs_path}' | grep -v grep | awk '{{print $2}}' | xargs -r kill -9"
-            subprocess.run(ps_cmd, shell=True, timeout=10)
+            res = subprocess.run(
+                ["ps", "-eo", "pid,args"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if res.returncode == 0 and res.stdout.strip():
+                for line in res.stdout.splitlines()[1:]:
+                    parts = line.strip().split(None, 1)
+                    if len(parts) == 2:
+                        pid_str, cmdline = parts
+                        if pid_str.isdigit():
+                            cmdline_norm = cmdline.lower()
+                            if abs_path.lower() in cmdline_norm:
+                                if _is_default_profile and "--remote-debugging-port" not in cmdline_norm:
+                                    continue
+                                _print_log(f"Killing profile-bound zombie Chrome process (PID: {pid_str})...")
+                                subprocess.run(
+                                    ["kill", "-9", pid_str],
+                                    capture_output=True
+                                )
         except Exception as e:
             logger.warning(f"[BrowserFactory] Linux profile cleanup failed: {e}")
 

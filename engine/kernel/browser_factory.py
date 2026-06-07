@@ -685,7 +685,9 @@ def _launch_chrome_with_timeout(fresh_options, headless, use_subprocess, version
                 _existing_load_ext = [
                     a for a in extra_cli_args if a.startswith("--load-extension=")
                 ]
-                if hasattr(fresh_options, '_extensions') and fresh_options._extensions:
+                _has_extensions = hasattr(fresh_options, '_extensions') and fresh_options._extensions
+                _has_extension_files = hasattr(fresh_options, '_extension_files') and fresh_options._extension_files
+                if _has_extensions or _has_extension_files:
                     import base64, zipfile as _zf, io as _io, hashlib as _hl, os as _os
                     _unpack_root = _os.path.join(
                         _os.path.dirname(_os.path.abspath(__file__)),
@@ -693,30 +695,60 @@ def _launch_chrome_with_timeout(fresh_options, headless, use_subprocess, version
                     )
                     _unpack_root = _os.path.normpath(_unpack_root)
                     _extra_dirs = []
-                    for _idx, _ext_blob in enumerate(fresh_options._extensions):
-                        try:
-                            # _extensions items are base64-encoded CRX bytes.
-                            # CRX3 files have a Protobuf binary header before the ZIP
-                            # content, so we MUST search for the ZIP PK magic bytes
-                            # rather than passing the raw bytes to ZipFile directly.
-                            _raw = base64.b64decode(_ext_blob)
-                            _h = _hl.md5(_raw).hexdigest()[:8]
-                            _udir = _os.path.join(_unpack_root, f"_factory_ext_{_h}")
-                            if not _os.path.isfile(_os.path.join(_udir, "manifest.json")):
-                                _os.makedirs(_udir, exist_ok=True)
-                                # Find ZIP magic (handles both CRX2 and CRX3 headers)
-                                _zip_start = _raw.find(b"PK\x03\x04")
-                                if _zip_start == -1:
-                                    _print_log(f"Extension blob {_idx}: no ZIP magic found — skipping.", "WARNING")
-                                    continue
-                                _zip_bytes = _raw[_zip_start:]
-                                with _zf.ZipFile(_io.BytesIO(_zip_bytes)) as _zfile:
-                                    _zfile.extractall(_udir)
-                            if _os.path.isfile(_os.path.join(_udir, "manifest.json")):
-                                _extra_dirs.append(_udir)
-                                _print_log(f"Belt-and-suspenders: unpacked extension blob {_idx} → {_udir}")
-                        except Exception as _ee:
-                            _print_log(f"Failed to unpack extension blob {_idx}: {_ee}", "WARNING")
+
+                    if _has_extensions:
+                        for _idx, _ext_blob in enumerate(fresh_options._extensions):
+                            try:
+                                # _extensions items are base64-encoded CRX bytes.
+                                # CRX3 files have a Protobuf binary header before the ZIP
+                                # content, so we MUST search for the ZIP PK magic bytes
+                                # rather than passing the raw bytes to ZipFile directly.
+                                _raw = base64.b64decode(_ext_blob)
+                                _h = _hl.md5(_raw).hexdigest()[:8]
+                                _udir = _os.path.join(_unpack_root, f"_factory_ext_{_h}")
+                                if not _os.path.isfile(_os.path.join(_udir, "manifest.json")):
+                                    _os.makedirs(_udir, exist_ok=True)
+                                    # Find ZIP magic (handles both CRX2 and CRX3 headers)
+                                    _zip_start = _raw.find(b"PK\x03\x04")
+                                    if _zip_start == -1:
+                                        _print_log(f"Extension blob {_idx}: no ZIP magic found — skipping.", "WARNING")
+                                        continue
+                                    _zip_bytes = _raw[_zip_start:]
+                                    with _zf.ZipFile(_io.BytesIO(_zip_bytes)) as _zfile:
+                                        _zfile.extractall(_udir)
+                                if _os.path.isfile(_os.path.join(_udir, "manifest.json")):
+                                    _extra_dirs.append(_udir)
+                                    _print_log(f"Belt-and-suspenders: unpacked extension blob {_idx} → {_udir}")
+                            except Exception as _ee:
+                                _print_log(f"Failed to unpack extension blob {_idx}: {_ee}", "WARNING")
+
+                    if _has_extension_files:
+                        for _idx, _ext_file in enumerate(fresh_options._extension_files):
+                            try:
+                                if _os.path.isdir(_ext_file):
+                                    if _os.path.isfile(_os.path.join(_ext_file, "manifest.json")):
+                                        _extra_dirs.append(_os.path.abspath(_ext_file))
+                                        _print_log(f"Belt-and-suspenders: added extension directory {_idx} → {_ext_file}")
+                                elif _os.path.isfile(_ext_file) and str(_ext_file).lower().endswith(".crx"):
+                                    with open(_ext_file, "rb") as f:
+                                        _raw = f.read()
+                                    _h = _hl.md5(_raw).hexdigest()[:8]
+                                    _udir = _os.path.join(_unpack_root, f"_factory_ext_file_{_h}")
+                                    if not _os.path.isfile(_os.path.join(_udir, "manifest.json")):
+                                        _os.makedirs(_udir, exist_ok=True)
+                                        _zip_start = _raw.find(b"PK\x03\x04")
+                                        if _zip_start == -1:
+                                            _print_log(f"Extension file {_ext_file}: no ZIP magic found — skipping.", "WARNING")
+                                            continue
+                                        _zip_bytes = _raw[_zip_start:]
+                                        with _zf.ZipFile(_io.BytesIO(_zip_bytes)) as _zfile:
+                                            _zfile.extractall(_udir)
+                                    if _os.path.isfile(_os.path.join(_udir, "manifest.json")):
+                                        _extra_dirs.append(_udir)
+                                        _print_log(f"Belt-and-suspenders: unpacked extension file {_ext_file} → {_udir}")
+                            except Exception as _ee:
+                                _print_log(f"Failed to process extension file {_ext_file}: {_ee}", "WARNING")
+
                     if _extra_dirs:
                         # Merge with existing --load-extension args, deduplicate
                         _existing_dirs = []
@@ -1245,6 +1277,11 @@ def create_chrome(
     for attempt in range(1, max_retries + 1):
         # Step 3: Create FRESH ChromeOptions for every attempt
         fresh_options = uc.ChromeOptions()
+        if options:
+            if hasattr(options, '_extensions'):
+                fresh_options._extensions = list(options._extensions)
+            if hasattr(options, '_extension_files'):
+                fresh_options._extension_files = list(options._extension_files)
 
         for arg in original_arguments:
             fresh_options.add_argument(arg)

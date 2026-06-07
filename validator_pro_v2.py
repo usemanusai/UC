@@ -6399,7 +6399,7 @@ def check_accounts_logic(
                     disable_extensions_option=disable_extensions_option,
                     headless=headless,
                     chromedriver_args=account_chromedriver_args,
-                    start_url=website_link,  # FIX: Open Chrome directly on target URL
+                    start_url=website_link,
                 )
 
                 if not browser:

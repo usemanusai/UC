@@ -456,7 +456,8 @@ def _kill_chrome_processes_for_profile(user_data_dir: str):
                                     creationflags=subprocess.CREATE_NO_WINDOW
                                 )
         except Exception as e:
-            logger.warning(f"[BrowserFactory] Profile-specific process cleanup failed: {e}")
+            _print_log(f"Process check/kill failed: {e}", "WARNING")
+            _print_log("Continuing with launch attempt anyway.")
     else:
         # Linux/macOS: match cmdline processes
         try:

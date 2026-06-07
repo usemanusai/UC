@@ -393,6 +393,10 @@ var_claude_proxy_url     = tk.StringVar(value="http://localhost:8080")
 var_claude_proxy_model   = tk.StringVar(value="gemini-3-flash")
 
 var_proxy_list_path = tk.StringVar(value="")
+
+# Variables for Third-Party Captcha Solvers
+var_captcha_service = tk.StringVar(value="capsolver")
+var_captcha_api_key = tk.StringVar(value="")
 var_cookie_list_path = tk.StringVar(value="")
 
 # --- Automated Log Ingestion & Per-Account Cookie Pairing Engine ---
@@ -1877,12 +1881,22 @@ def populate_db_from_log_scan_batch(pairs: list, db_name: str) -> tuple:
         conn.execute("PRAGMA synchronous=NORMAL")
         cur = conn.cursor()
         ins_batch, upd_batch = [], []
-        for pair in pairs:
-            email = pair.get("email", "")
-            pwd   = pair.get("password", "")
-            cp    = pair.get("cookie_path")
+
+        for item in pairs:
+            if isinstance(item, tuple):
+                if len(item) == 3:
+                    email, pwd, cp = item
+                else:
+                    email, pwd = item
+                    cp = None
+            else:
+                email = item.get("email", "")
+                pwd   = item.get("password", "")
+                cp    = item.get("cookie_path")
+
             if not email or not pwd:
                 continue
+
             ins_batch.append((email, pwd, cp))
             if cp:
                 upd_batch.append((cp, email, pwd))
@@ -2069,7 +2083,55 @@ class LogIngestionDialog(tk.Toplevel):
             self._sources.append(p)
             self._lb.insert(tk.END, p)
 
+
+    def _add_structured_file(self):
+        fpaths = filedialog.askopenfilenames(
+            title="Select Structured Files (CSV, JSON, TXT)",
+            filetypes=(("Structured files", "*.csv;*.json;*.txt"), ("All files", "*.*"))
+        )
+        if not fpaths:
+            return
+
+        for p in fpaths:
+            if p not in self._sources:
+                self._sources.append(p)
+                self._lb.insert(tk.END, f"📄 {p}")
+
     def _add_files(self):
+        fpaths = filedialog.askopenfilenames(
+            title="Select Text Files",
+            filetypes=(("Text files", "*.txt"), ("All files", "*.*"))
+        )
+        if not fpaths:
+            return
+        added = 0
+        for p in fpaths:
+            if p not in self.selected_sources:
+                self.selected_sources.append(p)
+                self.source_listbox.insert(tk.END, f"📄 {p}")
+                added += 1
+        self._log(f"Added {added} files.")
+
+    def _add_structured_file(self):
+        fpaths = filedialog.askopenfilenames(
+            title="Select Structured Files (CSV, JSON, TXT)",
+            filetypes=(("Structured files", "*.csv;*.json;*.txt"), ("All files", "*.*"))
+        )
+        if not fpaths:
+            return
+
+        added = 0
+        for p in fpaths:
+            if p not in self.selected_sources:
+                self.selected_sources.append(p)
+                self.source_listbox.insert(tk.END, f"📄 {p}")
+                added += 1
+        self._log(f"Added {added} structured files.")
+
+        # Override the worker logic to explicitly parse these formats later if needed
+        # Since _scan_flat_cred_file handles txt, we will patch it to handle json and csv
+
+
         paths = filedialog.askopenfilenames(title="Select Credential File(s)", parent=self,
                                             filetypes=[("Text Files", "*.txt"), ("All Files", "*.*")])
         for p in paths:
@@ -10258,6 +10320,17 @@ def browse_proxy_list():
 ttk.Button(frame_stealth, text="Browse...", command=browse_proxy_list).grid(
     column=2, row=7, padx=(2, 10), pady=(15, 5), sticky="w"
 )
+
+# --- Third-Party Captcha Solvers ---
+frame_captcha_solvers = ttk.LabelFrame(frame_stealth, text="Third-Party Captcha Solvers (Optional)")
+frame_captcha_solvers.grid(column=0, row=10, columnspan=4, padx=10, pady=10, sticky="ew")
+
+ttk.Label(frame_captcha_solvers, text="Service:").grid(column=0, row=0, padx=10, pady=5, sticky="e")
+ttk.OptionMenu(frame_captcha_solvers, var_captcha_service, "capsolver", "capsolver", "2captcha", "anticaptcha").grid(column=1, row=0, padx=10, pady=5, sticky="w")
+
+ttk.Label(frame_captcha_solvers, text="API Key:").grid(column=2, row=0, padx=10, pady=5, sticky="e")
+ttk.Entry(frame_captcha_solvers, width=40, textvariable=var_captcha_api_key).grid(column=3, row=0, padx=10, pady=5, sticky="w")
+
 
 # --- Stealth: Cookie List Path ---
 ttk.Label(frame_stealth, text="Cookie List File:").grid(

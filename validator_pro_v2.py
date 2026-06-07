@@ -37,7 +37,6 @@ from datetime import datetime
 import json
 import webbrowser
 import requests
-import pickle
 try:
     import locator
 except ImportError:
@@ -406,7 +405,7 @@ css_click_frames = []  # For CSS Selector-based clicks
 css_clicks = []
 chromedriver_args_list = []
 config_file_path = ""
-settings_file = locator.get_absolute_path("engine/registry/settings.pkl")  # For Pickle module
+settings_file = locator.get_absolute_path("engine/registry/settings.json")  # For JSON module
 
 # Define the path to the Chrome executable and user data directory
 user_data_dir = locator.get_chrome_user_data_dir()
@@ -7819,10 +7818,10 @@ def select_profile():
 
 
 # -------------------
-# Save and Load Settings Functions (Pickle)
+# Save and Load Settings Functions (JSON)
 # -------------------
 def save_settings():
-    """Saves current settings to a file using the pickle module."""
+    """Saves current settings to a file using the json module."""
     settings = {}
     # Collect variables
     settings['var_inner_html_capture'] = var_inner_html_capture.get()
@@ -7928,12 +7927,12 @@ def save_settings():
     # =========================================================================
     # ATOMIC WRITE WITH BACKUP ROTATION (2026-06-04)
     # Old pattern: open('wb') truncates the file BEFORE writing. If the app
-    # crashes mid-write, settings.pkl is 0 bytes → all settings gone forever.
+    # crashes mid-write, settings.json is 0 bytes → all settings gone forever.
     #
     # New pattern:
-    #   1. Write to settings.pkl.tmp (new temp file, never touches the original)
-    #   2. Rename current settings.pkl → settings.pkl.bak (backup)
-    #   3. Atomic rename settings.pkl.tmp → settings.pkl
+    #   1. Write to settings.json.tmp (new temp file, never touches the original)
+    #   2. Rename current settings.json → settings.json.bak (backup)
+    #   3. Atomic rename settings.json.tmp → settings.json
     #
     # At ALL times, at least one complete copy exists on disk.
     # =========================================================================
@@ -7944,9 +7943,9 @@ def save_settings():
     _fd = None
     _tmp_path = None
     try:
-        _fd, _tmp_path = _tempfile_mod.mkstemp(dir=_settings_dir, suffix='.pkl.tmp')
-        with os.fdopen(_fd, 'wb') as _tmp_f:
-            pickle.dump(settings, _tmp_f)
+        _fd, _tmp_path = _tempfile_mod.mkstemp(dir=_settings_dir, suffix='.json.tmp')
+        with os.fdopen(_fd, 'w', encoding='utf-8') as _tmp_f:
+            json.dump(settings, _tmp_f, indent=4)
             _tmp_f.flush()
             os.fsync(_tmp_f.fileno())  # Force OS to flush to disk
         _fd = None  # os.fdopen took ownership, don't close again
@@ -7957,7 +7956,7 @@ def save_settings():
                 os.replace(settings_file, _bak_path)
             except OSError as _bak_err:
                 print_action(f"{Fore.YELLOW}Warning: Could not create settings backup: {_bak_err}{Style.RESET_ALL}")
-        # Atomic rename: tmp → settings.pkl
+        # Atomic rename: tmp → settings.json
         os.replace(_tmp_path, settings_file)
         _tmp_path = None  # Successfully renamed, don't clean up
         print_action(f"{Fore.GREEN}Settings saved to {settings_file}.{Style.RESET_ALL}")
@@ -7973,7 +7972,7 @@ def save_settings():
 
 
 def load_settings():
-    """Loads settings from a file using the pickle module.
+    """Loads settings from a file using the json module.
     
     Falls back to the .bak backup file if the main settings file is
     corrupt (e.g. truncated by a crash during a previous save).
@@ -7982,9 +7981,9 @@ def load_settings():
     _loaded_from_backup = False
     
     def _try_load(path):
-        """Attempt to unpickle settings from a given path."""
-        with open(path, 'rb') as f:
-            data = pickle.load(f)
+        """Attempt to load settings from a given path using json."""
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
         if not isinstance(data, dict):
             raise ValueError(f"Expected dict, got {type(data).__name__}")
         return data
@@ -8181,7 +8180,7 @@ def load_settings():
         print_action(f"{Fore.RED}Error applying loaded settings: {e}{Style.RESET_ALL}")
     
     if _loaded_from_backup:
-        # Immediately re-save so the main settings.pkl is repaired from the backup
+        # Immediately re-save so the main settings.json is repaired from the backup
         try:
             save_settings()
             print_action(f"{Fore.GREEN}Settings auto-repaired from backup → main file restored.{Style.RESET_ALL}")
@@ -10529,7 +10528,7 @@ def _schedule_auto_save(*args):
 
 
 def _perform_auto_save():
-    """Runs the actual pickle dump on the main thread after the debounce window."""
+    """Runs the actual json dump on the main thread after the debounce window."""
     global _auto_save_timer_id
     _auto_save_timer_id = None
     try:

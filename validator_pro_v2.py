@@ -4174,7 +4174,7 @@ def _run_agent_browser(args):
         i = 0
         while i < len(clean_args):
             arg = clean_args[i]
-            if arg in ["--session", "--timeout", "--cdp", "--args", "--extension"]:
+            if arg in {"--session", "--timeout", "--cdp", "--args", "--extension"}:
                 # These take a value
                 if i + 1 < len(clean_args):
                     global_flags.append(arg)
@@ -4183,7 +4183,7 @@ def _run_agent_browser(args):
                 else:
                     global_flags.append(arg)
                     i += 1
-            elif arg in ["--headed", "--headless", "--json", "--full"]:
+            elif arg in {"--headed", "--headless", "--json", "--full"}:
                 # These are standalone global flags
                 global_flags.append(arg)
                 i += 1

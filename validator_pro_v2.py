@@ -6354,6 +6354,86 @@ def check_accounts_logic(
                     account_chromedriver_args = list(base_chromedriver_args)
 
                     if proxy_enabled:
+                        if ProxyRotator.is_loaded():
+                            # ProxyRotator already filtered / validated the full list.
+                            # get_next() is thread-safe round-robin or random based on mode.
+                            proxy_argument = ProxyRotator.get_next(proxy_type=proxy_type)
+                            if proxy_argument:
+                                print_action(
+                                    f"{Fore.YELLOW}[Proxy] Account {email} → {proxy_argument}{Style.RESET_ALL}"
+                                )
+                                # Strip any stale --proxy-server= before injecting the fresh proxy
+                                account_chromedriver_args = [
+                                    a for a in account_chromedriver_args
+                                    if not a.startswith('--proxy-server=')
+                                ]
+                                account_chromedriver_args.append(f"--proxy-server={proxy_argument}")
+                            else:
+                                print_action(f"{Fore.RED}[Proxy] ProxyRotator returned None - all proxies may be dead. Running without proxy for {email}.{Style.RESET_ALL}")
+                        elif proxies:
+                            # ProxyRotator not yet loaded - fall back to direct list (legacy path)
+                            valid_proxies = [
+                                p for p in proxies
+                                if p and isinstance(p, str) and p.strip() and ':' in p
+                            ]
+                            if not valid_proxies:
+                                print_action(f"{Fore.RED}[Proxy] No valid proxies in the list. Skipping proxy for {email}.{Style.RESET_ALL}")
+                                proxy = None
+                            else:
+                                if proxy_mode == "Static Proxies":
+                                    proxy = valid_proxies[proxy_index % len(valid_proxies)]
+                                    proxy_index += 1
+                                elif proxy_mode == "Rotating Proxies":
+                                    proxy = random.choice(valid_proxies)
+                                else:
+                                    proxy = None
+
+                browser = open_undetected_browser_with_options(
+                    current_user_data_dir,
+                    profile_name,
+                    incognito_mode=capture_settings.get("incognito_mode", False),
+                    user_agent=selected_user_agent,
+                    load_extensions=load_extensions,
+                    disable_notifications=disable_notifications,
+                    disable_infobars=disable_infobars,
+                    start_maximized=start_maximized,
+                    disable_extensions_option=disable_extensions_option,
+                    headless=headless,
+                    chromedriver_args=account_chromedriver_args,
+                    start_url=website_link,
+                )
+
+
+                if stop_event.is_set():
+                    print_action(
+                        f"{Fore.RED}Force Stop activated while paused. Stopping account checks.{Style.RESET_ALL}"
+                    )
+                    break
+
+            if stop_event.is_set():
+                break
+
+            email, password = account
+            print_action(
+                f"{Fore.CYAN}Checking account {index}/{len(accounts)}: {email}{Style.RESET_ALL}"
+            )
+            try:
+                # Initialize browser if it doesn't exist or if we're not using the same session
+                if not browser or not var_use_same_session.get():
+                    selected_user_agent = None
+
+                    if custom_user_agents:
+                        selected_user_agent = random.choice(custom_user_agents)
+                        user_agent_index += 1
+
+                    # ----------------------------------------------------------------
+                    # Build a FRESH per-account copy of args from the immutable base.
+                    # This prevents proxy / debug-port args from accumulating across
+                    # iterations (the root cause of Bug 1).
+                    # ----------------------------------------------------------------
+                    account_chromedriver_args = list(base_chromedriver_args)
+
+                    if proxy_enabled:
                         proxy_argument = None
                         if 'apply_network_stealth' in globals() and (proxies or ProxyRotator.is_loaded()):
                             raw_list = proxies if proxies else ProxyRotator._proxies

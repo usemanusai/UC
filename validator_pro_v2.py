@@ -155,6 +155,7 @@ try:
     from openrouter_client import OpenRouterClient
     from engine.integrations.openrouter_integration import OpenRouterIntegration
     import browser_reinstaller
+    from browser_reinstaller import BrowserReinstaller
     from session_isolation import SessionIsolationManager
     from human_jitter import HumanJitter
     from network_stealth import apply_network_stealth
@@ -5682,7 +5683,7 @@ def check_account(
                             for _ in range(int(num_clicks)):
                                 try:
                                     curr_x, curr_y = pyautogui.position()
-                                    HumanJitter.move_mouse_stealth(curr_x, curr_y, x, y)
+                                    HumanJitter.move_mouse_stealth(x, y)
                                     pyautogui.click()
                                 except Exception:
                                     pyautogui.click(x=x, y=y)
@@ -6353,52 +6354,69 @@ def check_accounts_logic(
                     account_chromedriver_args = list(base_chromedriver_args)
 
                     if proxy_enabled:
-                        if ProxyRotator.is_loaded():
-                            # ProxyRotator already filtered / validated the full list.
-                            # get_next() is thread-safe round-robin or random based on mode.
-                            proxy_argument = ProxyRotator.get_next(proxy_type=proxy_type)
-                            if proxy_argument:
-                                print_action(
-                                    f"{Fore.YELLOW}[Proxy] Account {email} → {proxy_argument}{Style.RESET_ALL}"
-                                )
-                                # Strip any stale --proxy-server= before injecting the fresh proxy
-                                account_chromedriver_args = [
-                                    a for a in account_chromedriver_args
-                                    if not a.startswith('--proxy-server=')
-                                ]
-                                account_chromedriver_args.append(f"--proxy-server={proxy_argument}")
-                            else:
-                                print_action(f"{Fore.RED}[Proxy] ProxyRotator returned None - all proxies may be dead. Running without proxy for {email}.{Style.RESET_ALL}")
-                        elif proxies:
-                            # ProxyRotator not yet loaded - fall back to direct list (legacy path)
+                        proxy_argument = None
+                        if 'apply_network_stealth' in globals() and (proxies or ProxyRotator.is_loaded()):
+                            raw_list = proxies if proxies else ProxyRotator._proxies
                             valid_proxies = [
-                                p for p in proxies
+                                p for p in raw_list
                                 if p and isinstance(p, str) and p.strip() and ':' in p
                             ]
-                            if not valid_proxies:
-                                print_action(f"{Fore.RED}[Proxy] No valid proxies in the list. Skipping proxy for {email}.{Style.RESET_ALL}")
-                                proxy = None
-                            else:
-                                if proxy_mode == "Static Proxies":
-                                    proxy = valid_proxies[proxy_index % len(valid_proxies)]
-                                    proxy_index += 1
-                                elif proxy_mode == "Rotating Proxies":
-                                    proxy = random.choice(valid_proxies)
-                                else:
-                                    proxy = None
-
-                                if proxy:
-                                    proxy_clean = proxy.strip()
-                                    if '://' in proxy_clean:
-                                        proxy = proxy_clean
-                                    else:
+                            if valid_proxies:
+                                print_action(f"{Fore.CYAN}[Stealth] Validating residential proxies via network_stealth...{Style.RESET_ALL}")
+                                selected_proxy = apply_network_stealth(None, valid_proxies)
+                                if selected_proxy:
+                                    proxy_argument = selected_proxy
+                                    if not proxy_argument.startswith(('http://', 'https://', 'socks5://')):
                                         if proxy_type in ["HTTP", "HTTPS", "SOCKS5"]:
-                                            proxy = f"{proxy_type.lower()}://{proxy_clean}"
+                                            proxy_argument = f"{proxy_type.lower()}://{proxy_argument}"
                                         else:
-                                            proxy = f"http://{proxy_clean}"
+                                            proxy_argument = f"http://{proxy_argument}"
+                                    print_action(f"{Fore.GREEN}[Stealth] Selected residential proxy: {proxy_argument}{Style.RESET_ALL}")
+                                else:
+                                    print_action(f"{Fore.RED}[Stealth] Proxy failed residential verification. Rotating...{Style.RESET_ALL}")
 
+                        if not proxy_argument:
+                            if ProxyRotator.is_loaded():
+                                proxy_argument = ProxyRotator.get_next(proxy_type=proxy_type)
+                            elif proxies:
+                                # ProxyRotator not yet loaded - fall back to direct list (legacy path)
+                                valid_proxies = [
+                                    p for p in proxies
+                                    if p and isinstance(p, str) and p.strip() and ':' in p
+                                ]
+                                if valid_proxies:
+                                    if proxy_mode == "Static Proxies":
+                                        proxy_raw = valid_proxies[proxy_index % len(valid_proxies)]
+                                        proxy_index += 1
+                                    elif proxy_mode == "Rotating Proxies":
+                                        proxy_raw = random.choice(valid_proxies)
+                                    else:
+                                        proxy_raw = None
+
+                                    if proxy_raw:
+                                        proxy_clean = proxy_raw.strip()
+                                        if '://' in proxy_clean:
+                                            proxy_argument = proxy_clean
+                                        else:
+                                            if proxy_type in ["HTTP", "HTTPS", "SOCKS5"]:
+                                                proxy_argument = f"{proxy_type.lower()}://{proxy_clean}"
+                                            else:
+                                                proxy_argument = f"http://{proxy_clean}"
+
+                        if proxy_argument:
+                            print_action(
+                                f"{Fore.YELLOW}[Proxy] Account {email} → {proxy_argument}{Style.RESET_ALL}"
+                            )
+                            # Strip any stale --proxy-server= before injecting the fresh proxy
+                            account_chromedriver_args = [
+                                a for a in account_chromedriver_args
+                                if not a.startswith('--proxy-server=')
+                            ]
+                            account_chromedriver_args.append(f"--proxy-server={proxy_argument}")
                         else:
-                            print_action(f"{Fore.YELLOW}[Proxy] Proxy enabled but no proxy list loaded. Skipping proxy for {email}.{Style.RESET_ALL}")
+                            print_action(
+                                f"{Fore.YELLOW}[Proxy] Proxy enabled but no valid proxy resolved. Skipping proxy for {email}.{Style.RESET_ALL}"
+                            )
 
 
                     # STEALTH INJECTION: Per-Session Linguistic Chameleon Persona Regeneration

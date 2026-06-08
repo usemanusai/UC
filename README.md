@@ -111,6 +111,8 @@ accounts_checker_builder-main/
 - **Google Chrome:** Version 120+ (matching chromedriver auto-downloaded)
 - **RAM:** 4 GB minimum, 8 GB recommended (each Chrome instance uses ~300 MB)
 
+> **Mandate:** The project strictly follows a 'Zero Software Cost, Self-Hosted First' mandate. Dependencies must be restricted to the existing `requirements.txt` unless a minimal addition is heavily justified, and paid third-party dependencies or cloud-only features are prohibited.
+
 Install dependencies with:
 ```bash
 pip install -r requirements.txt
@@ -154,8 +156,8 @@ The Tkinter GUI is organized into 11 specialized configuration tabs:
   - `🔓 Unlock`: Enables field editing and drag-and-drop block reordering.
   - `↺ Reset to Default`: Rebuilds the sequence back to the default 11 fields.
   - `🎨 Theme Colors`: Opens the color customizer dialog to modify the dark-theme UI palettes.
-  - `➕ Add Workflow Rule`: Opens the custom workflow step builder:
-    - **Step Types**: `Text Input` (maps to `custom_text`), `Click Element` (maps to `custom_click`), `Sleep Delay` (maps to `custom_sleep`).
+  - `➕ Add Workflow Rule`: Opens the custom workflow step builder (which natively supports custom post-login macro actions):
+    - **Step Types**: `Custom Navigation`, `Text Input` (maps to `custom_text`), `Click Element` (maps to `custom_click`), `Sleep Delay` (maps to `custom_sleep`), `AI Content Generation`, and `Data Saving`.
     - **Step Label**: Customized name for the generated block.
 - **Draggable Field Sequence Blocks**:
   - `Website Target Link (Required)`: The starting entrypoint login URL.
@@ -327,7 +329,7 @@ Located in `human_jitter.py`, this module replaces standard Selenium macros with
 Located in `session_isolation.py`, this subsystem isolates profiles to prevent account tracking:
 
 - **Unique Directory & Port Allocation**: Allocates isolated profile directories (`temp_sessions/session_XXXXXXXX/`) and checks localhost sockets to bind unique ports (15000–25000) for debugger connections.
-- **Preferences Seeding**: Prior to launching Chrome, writes a raw JSON `Preferences` file into the new profile folder (specifically under `Profile 1`). This seeds `has_seen_welcome_page=True` and `developer_mode=True` to prevent the initial Welcome wizard and enable extension loading.
+- **Preferences Seeding**: Prior to launching Chrome, writes a raw JSON `Preferences` file into the new profile folder (specifically under `Profile 1`). This seeds `has_seen_welcome_page=True` and `developer_mode=True` to prevent the initial Welcome wizard and enable extension loading. Stealth pre-injection of cookies, proxies, and user-agents into Chrome sessions is achieved using dynamic, unpacked Chrome extensions leveraging standard APIs (`chrome.cookies`, `chrome.proxy`, `chrome.declarativeNetRequest`) rather than `chrome.debugger`, to avoid triggering Chrome's debugging infobar.
 - **Verified Extension ID Parsing**: Unpacked extensions require stable IDs to execute scripts in cross-origin frames. The manager reads `_metadata/verified_contents.json`, decodes the JWS signed-content payload via Base64url, and extracts the authentic Chrome Web Store `item_id` (falling back to MD5 if missing).
 - **Toolbar Pinning**: Invokes `extension_configurator.py` to pin the loaded extension IDs directly in Chrome's internal registry, ensuring their icons are visible on the toolbar from the start.
 - **Stale Cleanups**: Performs directory garbage collection on startup, deleting profiles older than 3600 seconds.
@@ -369,6 +371,7 @@ Located in `tab_monitor.py`, this utility runs alongside the checker to monitor 
 This section covers the auxiliary modules, prebuilt configs, and advanced agentic features packed into UC.
 
 #### A. AI CAPTCHA Solver (`ai_captcha/`)
+- **CaptchaDispatcher**: CAPTCHA solving architecture centers around `ai_captcha/captcha_dispatcher.py` (`CaptchaDispatcher`), which acts as a routing hub for integrating numerous optional 3rd-party solving APIs (Capsolver, 2Captcha, Anti-Captcha, CapMonster, NopeCHA, azapi, CaptchaAI) using their official structures.
 - **OCR-based Resolution**: Integrates locally executed OCR-based CAPTCHA solving modules.
 - **Claude Proxy Bridge**: Uses `claude_proxy_bridge.py` to route visual/textual CAPTCHAs to Anthropic models, matching API payloads to local endpoints, verifying server health via `/health`, and caching results in `ocr_results.txt` to minimize API costs.
 
@@ -632,6 +635,7 @@ Supports multiple formats (`host:port`, `host:port:user:pass`, `socks5://host:po
 UC features an **Automated Proxy Health Checker & Fetcher** (via `ProxySourceWorker`). When enabled:
 - The UI accepts a `Proxy Source URL` and a configurable `Fetch Interval`.
 - A background daemon automatically fetches fresh proxy lists from the remote HTTP endpoint while validation is active.
+- A background daemon (`ProxySourceWorker` thread) automatically and periodically fetches fresh proxy rotators from configurable HTTP source URLs while validation is active.
 - Proxies are injected into the thread-safe `ProxyRotator` dynamically, preventing failures due to stale or dead proxy nodes midway through a large batch.
 
 ---
@@ -653,7 +657,7 @@ Users can also generate offline reports with the built-in **SQLite Log-to-CSV Re
 
 - `engine/registry/ai_config.json`: Model configurations.
 - `engine/registry/captcha_settings.json`: Solver parameters.
-- `engine/registry/settings.pkl`: Persisted GUI settings.
+- `engine/registry/settings.pkl`: Persisted GUI settings. This settings dictionary is persisted automatically (e.g., via pickle/JSON) to save and load Tkinter UI states (checkboxes, inputs) across restarts so that configured values are retained.
 - `engine/registry/configs/`: Directory containing prebuilt selector configurations:
   - `my_digiseller_com.txt` (Digiseller login configuration)
   - `gmail_config.txt` (Gmail configuration)
@@ -677,3 +681,17 @@ Users can also generate offline reports with the built-in **SQLite Log-to-CSV Re
 ## License
 
 Private repository — all rights reserved.
+
+---
+
+## Development Guidelines
+
+- **Architecture:** New core logic and class-based architecture should be placed within the `engine/` directory structure (e.g., `engine/kernel/` and `engine/core/`). AI agent configurations and journals (such as the Palette UX agent prompt) are stored in the `.Jules/` directory at the project root.
+- **Testing:**
+  - The project supports pytest and standard unittest for testing. Test files can be located alongside the modules they test (e.g., `test_*.py`) and can be executed using `pytest .`, `pytest <path_to_test>`, or `python -m unittest discover`. Prefix test commands with `PYTHONPATH=.` if internal module resolution fails.
+  - Test cases are structured using the standard `unittest` framework (e.g., `unittest.TestCase`, `unittest.mock`) and are executed using the `pytest` runner.
+  - When mocking module-level imports in tests (e.g., to stub unavailable packages like `undetected_chromedriver`), use `unittest.mock.patch.dict('sys.modules', ...)` combined with `importlib.reload()` within a pytest fixture to prevent global test state pollution.
+- **Formatting:** The project uses `black` for Python code formatting, and `flake8` or `pylint` for code quality linting.
+- **Schemas:** The Python codebase uses Pydantic (supporting both V1 and V2) for schema validation. It includes dictionary-based fallback logic for environments without Pydantic, and tests should be written to account for both scenarios.
+- **Definition of Done:** A feature is only considered complete or 'shipped' when it is fully tested (via pytest), integrated into the UI or workflow (e.g., `validator_pro_v2.py`), and has accompanying documentation updates in the `README.md`.
+- **Tkinter GUI:** Tkinter GUI modifications should prioritize accessibility (e.g., logical tab order, keyboard navigation), use existing `ttk` styling configurations, and provide clear UI feedback or error messaging.

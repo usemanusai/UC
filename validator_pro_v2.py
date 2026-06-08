@@ -155,6 +155,7 @@ try:
     from openrouter_client import OpenRouterClient
     from engine.integrations.openrouter_integration import OpenRouterIntegration
     import browser_reinstaller
+    from browser_reinstaller import BrowserReinstaller
     from session_isolation import SessionIsolationManager
     from human_jitter import HumanJitter
     from network_stealth import apply_network_stealth
@@ -5682,7 +5683,7 @@ def check_account(
                             for _ in range(int(num_clicks)):
                                 try:
                                     curr_x, curr_y = pyautogui.position()
-                                    HumanJitter.move_mouse_stealth(curr_x, curr_y, x, y)
+                                    HumanJitter.move_mouse_stealth(x, y)
                                     pyautogui.click()
                                 except Exception:
                                     pyautogui.click(x=x, y=y)
@@ -6400,6 +6401,319 @@ def check_accounts_logic(
                     headless=headless,
                     chromedriver_args=account_chromedriver_args,
                     start_url=website_link,
+                )
+
+
+                if stop_event.is_set():
+                    print_action(
+                        f"{Fore.RED}Force Stop activated while paused. Stopping account checks.{Style.RESET_ALL}"
+                    )
+                    break
+
+            if stop_event.is_set():
+                break
+
+            email, password = account
+            print_action(
+                f"{Fore.CYAN}Checking account {index}/{len(accounts)}: {email}{Style.RESET_ALL}"
+            )
+            try:
+                # Initialize browser if it doesn't exist or if we're not using the same session
+                if not browser or not var_use_same_session.get():
+                    selected_user_agent = None
+
+                    if custom_user_agents:
+                        selected_user_agent = random.choice(custom_user_agents)
+                        user_agent_index += 1
+
+                    # ----------------------------------------------------------------
+                    # Build a FRESH per-account copy of args from the immutable base.
+                    # This prevents proxy / debug-port args from accumulating across
+                    # iterations (the root cause of Bug 1).
+                    # ----------------------------------------------------------------
+                    account_chromedriver_args = list(base_chromedriver_args)
+
+                    if proxy_enabled:
+                        proxy_argument = None
+                        if 'apply_network_stealth' in globals() and (proxies or ProxyRotator.is_loaded()):
+                            raw_list = proxies if proxies else ProxyRotator._proxies
+                            valid_proxies = [
+                                p for p in raw_list
+                                if p and isinstance(p, str) and p.strip() and ':' in p
+                            ]
+                            if valid_proxies:
+                                print_action(f"{Fore.CYAN}[Stealth] Validating residential proxies via network_stealth...{Style.RESET_ALL}")
+                                selected_proxy = apply_network_stealth(None, valid_proxies)
+                                if selected_proxy:
+                                    proxy_argument = selected_proxy
+                                    if not proxy_argument.startswith(('http://', 'https://', 'socks5://')):
+                                        if proxy_type in ["HTTP", "HTTPS", "SOCKS5"]:
+                                            proxy_argument = f"{proxy_type.lower()}://{proxy_argument}"
+                                        else:
+                                            proxy_argument = f"http://{proxy_argument}"
+                                    print_action(f"{Fore.GREEN}[Stealth] Selected residential proxy: {proxy_argument}{Style.RESET_ALL}")
+                                else:
+                                    print_action(f"{Fore.RED}[Stealth] Proxy failed residential verification. Rotating...{Style.RESET_ALL}")
+
+                        if not proxy_argument:
+                            if ProxyRotator.is_loaded():
+                                proxy_argument = ProxyRotator.get_next(proxy_type=proxy_type)
+                            elif proxies:
+                                # ProxyRotator not yet loaded - fall back to direct list (legacy path)
+                                valid_proxies = [
+                                    p for p in proxies
+                                    if p and isinstance(p, str) and p.strip() and ':' in p
+                                ]
+                                if valid_proxies:
+                                    if proxy_mode == "Static Proxies":
+                                        proxy_raw = valid_proxies[proxy_index % len(valid_proxies)]
+                                        proxy_index += 1
+                                    elif proxy_mode == "Rotating Proxies":
+                                        proxy_raw = random.choice(valid_proxies)
+                                    else:
+                                        proxy_raw = None
+
+                                    if proxy_raw:
+                                        proxy_clean = proxy_raw.strip()
+                                        if '://' in proxy_clean:
+                                            proxy_argument = proxy_clean
+                                        else:
+                                            if proxy_type in ["HTTP", "HTTPS", "SOCKS5"]:
+                                                proxy_argument = f"{proxy_type.lower()}://{proxy_clean}"
+                                            else:
+                                                proxy_argument = f"http://{proxy_clean}"
+
+                        if proxy_argument:
+                            print_action(
+                                f"{Fore.YELLOW}[Proxy] Account {email} → {proxy_argument}{Style.RESET_ALL}"
+                            )
+                            # Strip any stale --proxy-server= before injecting the fresh proxy
+                            account_chromedriver_args = [
+                                a for a in account_chromedriver_args
+                                if not a.startswith('--proxy-server=')
+                            ]
+                            account_chromedriver_args.append(f"--proxy-server={proxy_argument}")
+                        else:
+                            print_action(
+                                f"{Fore.YELLOW}[Proxy] Proxy enabled but no valid proxy resolved. Skipping proxy for {email}.{Style.RESET_ALL}"
+                            )
+
+
+                    # STEALTH INJECTION: Per-Session Linguistic Chameleon Persona Regeneration
+                    if stealth_settings and stealth_settings.get("jitter") and stealth_settings.get("openrouter_keys") and 'HumanJitter' in globals():
+                        try:
+                            keys = stealth_settings["openrouter_keys"]
+                            integration = _get_openrouter_integration(api_keys=keys)
+                            if integration:
+                                new_persona = integration.generate_stealth_persona_sync()
+                                if new_persona:
+                                    HumanJitter.set_persona(new_persona)
+                                    print_action(f"{Fore.MAGENTA}[Stealth] Linguistic Chameleon active: persona='{new_persona.get('type')}' wpm={new_persona.get('wpm')} hesitation={new_persona.get('hesitation')}{Style.RESET_ALL}")
+                        except Exception as pe:
+                            print_action(f"{Fore.YELLOW}[Stealth] Persona generation failed (non-critical): {pe}{Style.RESET_ALL}")
+                    if stealth_settings and stealth_settings.get("reinstall"):
+                        print_action(f"{Fore.CYAN}[STEALTH] Initiating Kernel-Level Browser Purge...{Style.RESET_ALL}")
+                        try:
+                            if 'BrowserReinstaller' in globals():
+                                BrowserReinstaller.full_purge()
+                            if stealth_settings.get("hwid_spoof") and 'BrowserReinstaller' in globals():
+                                BrowserReinstaller.rotate_hwid()
+                        except Exception as he:
+                            print_action(f"{Fore.RED}[STEALTH ERROR] Failed HWID/Purge: {he}{Style.RESET_ALL}")
+
+                    # STEALTH INJECTION: Session Isolation Engine
+                    # Each account gets its own debugging port appended to its OWN args copy.
+                    current_user_data_dir = user_data_dir
+
+                    # Phase 6: Auto-Isolation Override - when Log Ingestion mode is active and
+                    # var_log_ingestion_isolate is True, force session isolation regardless of checkbox state.
+                    effective_stealth = dict(stealth_settings) if stealth_settings else {}
+                    if var_log_ingestion_enabled.get() and var_log_ingestion_isolate.get():
+                        if not effective_stealth.get("isolation"):
+                            print_action(f"{Fore.CYAN}[Log Ingestion] Auto-activating session isolation for per-account cookie isolation.{Style.RESET_ALL}")
+                        effective_stealth["isolation"] = True
+
+                    if effective_stealth and effective_stealth.get("isolation"):
+                        try:
+                            if 'SessionIsolationManager' in globals():
+                                iso_manager = SessionIsolationManager()
+                                sess_data = iso_manager.get_isolated_session(
+                                    email,
+                                    load_extensions=load_extensions,
+                                    profile_directory=profile_name,
+                                )
+                                if sess_data:
+                                    print_action(f"{Fore.CYAN}[STEALTH] Isolated Session created for {email} on port {sess_data['port']}{Style.RESET_ALL}")
+                                    current_user_data_dir = sess_data['dir']
+                                    # Strip any stale --remote-debugging-port args before adding the new one.
+                                    # Without this guard the list grows by one port per account (Bug: accumulated ports).
+                                    account_chromedriver_args = [
+                                        a for a in account_chromedriver_args
+                                        if not a.startswith('--remote-debugging-port=')
+                                        and not a.startswith('--load-extension=')
+                                    ]
+                                    account_chromedriver_args.append(f"--remote-debugging-port={sess_data['port']}")
+                                    # Extension support for isolated sessions:
+                                    # get_isolated_session() seeded the profile Preferences file so Chrome
+                                    # honours --load-extension=. Now inject the arg explicitly into the
+                                    # chromedriver_args list so the attachment-mode Chrome CLI also gets it.
+                                    if load_extensions and sess_data.get('ext_arg'):
+                                        account_chromedriver_args.append(sess_data['ext_arg'])
+                                        print_action(f"{Fore.GREEN}[STEALTH] Extensions injected into isolated session for {email}.{Style.RESET_ALL}")
+                                    elif load_extensions and not sess_data.get('ext_arg'):
+                                        print_action(f"{Fore.YELLOW}[STEALTH] Load Extensions is ON but no unpacked extensions found in _ext_unpacked/. "
+                                                     f"Run once without isolation first to unpack CRX files.{Style.RESET_ALL}")
+                        except Exception as ie:
+                            print_action(f"{Fore.RED}[STEALTH ERROR] Isolation Failed: {ie}{Style.RESET_ALL}")
+
+                    browser = open_undetected_browser_with_options(
+                        current_user_data_dir,
+                        profile_name,
+                        incognito_mode=capture_settings.get("incognito_mode", False),
+                        user_agent=selected_user_agent,
+                        load_extensions=load_extensions,
+                        disable_notifications=disable_notifications,
+                        disable_infobars=disable_infobars,
+                        start_maximized=start_maximized,
+                        disable_extensions_option=disable_extensions_option,
+                        headless=headless,
+                        chromedriver_args=account_chromedriver_args,
+                        start_url=website_link,
+                    )
+
+                    if not browser:
+                        print_action(
+                            f"{Fore.RED}Failed to initialize browser for account {email}. Skipping...{Style.RESET_ALL}"
+                        )
+                        continue
+
+                    # ── CDP Background Tab Sweeper ─────────────────────────────────────
+                    # Started immediately after browser is confirmed healthy.
+                    # Runs every 0.3s via HTTP/CDP directly — zero Selenium thread risk.
+                    _sweeper_stop = _start_cdp_tab_sweeper(browser, website_link, interval=0.3)
+                    # ── Developer Mode Auto-Enabler ───────────────────────────────────
+                    # navigate to chrome://extensions, flip the toggle via shadow DOM JS,
+                    # then return to the target page. This ensures --load-extension=
+                    # directives are always honoured regardless of profile history.
+                    if load_extensions and var_developer_mode.get():
+                        try:
+                            _current_url_before = browser.current_url
+                            browser.get("chrome://extensions/")
+                            import time as _t
+                            # ── TAB PRUNE A: after navigating TO chrome://extensions/ ──────────
+                            # Extensions may open tabs when Chrome navigates away from the target
+                            # domain and their service workers wake up. Prune immediately.
+                            _t.sleep(1.5)  # Give extension tabs time to fully open
+                            _prune_extra_tabs(browser, website_link)
+                            browser.execute_script("""
+                                (function() {
+                                    var mgr = document.querySelector('extensions-manager');
+                                    if (!mgr) return;
+                                    var toolbar = mgr.shadowRoot && mgr.shadowRoot.querySelector('extensions-toolbar');
+                                    if (!toolbar || !toolbar.shadowRoot) return;
+                                    var toggle = toolbar.shadowRoot.querySelector('#devMode, cr-toggle[id=devMode]');
+                                    if (toggle && !toggle.checked) { toggle.click(); }
+                                })();
+                            """)
+                            _t.sleep(0.8)
+                            browser.get(_current_url_before if _current_url_before != 'data:,' else website_link)
+                            # ── TAB PRUNE B: after navigating BACK to target URL ─────────────
+                            # The target site may open tabs on load; extensions also react to
+                            # navigation to the target domain. Prune BEFORE handing off.
+                            _t.sleep(1.0)  # Give any spawned tabs time to appear
+                            _prune_extra_tabs(browser, website_link)
+                            print_action(f"{Fore.GREEN}[Extensions] Developer Mode enabled in browser.{Style.RESET_ALL}")
+                            # Final prune guard (original position kept for belt+suspenders)
+                            _prune_extra_tabs(browser, website_link)
+                        except Exception as _dme:
+                            print_action(f"{Fore.YELLOW}[Extensions] Developer Mode toggle skipped: {_dme}{Style.RESET_ALL}")
+
+                    # STEALTH INJECTION: CDP Cookie Injection Pre-Navigation
+                    # Phase 5: Two-path fallback
+                    #   Path A (Log Ingestion mode): per-account cookie_path from DB
+                    #   Path B (Global mode):        stealth_settings["cookie_list_path"] or config/tracking_cookies.json
+                    _cookie_file_to_inject = None
+                    if var_log_ingestion_enabled.get():
+                        _per_account_cookie = get_cookie_path_for_account(email, password, db_name)
+                        if _per_account_cookie:
+                            _cookie_file_to_inject = _per_account_cookie
+                            print_action(f"{Fore.CYAN}[Log Ingestion] Per-account cookie file resolved: {_cookie_file_to_inject}{Style.RESET_ALL}")
+                        else:
+                            # No DB entry yet - fall back to global path
+                            _cookie_file_to_inject = effective_stealth.get("cookie_list_path", "").strip() or None
+                            if _cookie_file_to_inject:
+                                print_action(f"{Fore.YELLOW}[Log Ingestion] No per-account cookie in DB for {email}; using global cookie file.{Style.RESET_ALL}")
+                    else:
+                        # Standard global cookie path
+                        _cookie_file_to_inject = (stealth_settings or {}).get("cookie_list_path", "").strip() or None
+                        if not _cookie_file_to_inject:
+                            # Legacy fallback: auto-detect tracking_cookies.json in config dir
+                            _fallback = locator.get_absolute_path("config/tracking_cookies.json") if 'locator' in globals() else None
+                            if _fallback and os.path.exists(_fallback):
+                                _cookie_file_to_inject = _fallback
+
+                    if _cookie_file_to_inject and os.path.exists(_cookie_file_to_inject):
+                        _injected_count = _inject_cookies_cdp(browser, _cookie_file_to_inject)
+                        print_action(f"{Fore.CYAN}[Stealth] {_injected_count} cookie(s) injected via CDP for {email}{Style.RESET_ALL}")
+                    elif _cookie_file_to_inject:
+                        print_action(f"{Fore.YELLOW}[Stealth] Cookie file path set but file not found: {_cookie_file_to_inject}{Style.RESET_ALL}")
+
+
+                # Prepare mouse clicks if enabled
+                mouse_clicks = []
+                if var_enable_mouse_clicks.get():
+                    for frame in mouse_click_frames:
+                        x = frame["x_entry"].get().strip()
+                        y = frame["y_entry"].get().strip()
+                        num_clicks = frame["num_clicks_entry"].get().strip()
+                        interval = frame["interval_entry"].get().strip()
+                        if x and y and num_clicks and interval:
+                            mouse_clicks.append((x, y, num_clicks, interval))
+                        else:
+                            print_action(
+                                f"{Fore.YELLOW}Incomplete mouse click data; skipping this click action.{Style.RESET_ALL}"
+                            )
+                    # Prepare CSS Selector clicks
+                    css_clicks = []
+                    for frame in css_click_frames:
+                        selector = frame["selector_entry"].get().strip()
+                        num_clicks = frame["num_clicks_entry"].get().strip()
+                        interval = frame["interval_entry"].get().strip()
+                        if selector and num_clicks and interval:
+                            css_clicks.append((selector, num_clicks, interval))
+                        else:
+                            print_action(
+                                f"{Fore.YELLOW}Incomplete CSS click data; skipping this CSS click action.{Style.RESET_ALL}"
+                            )
+
+                # ── Ensure CDP sweeper is active for same-session reuse ────────────────
+                # When same_session=True the browser block above is skipped for accounts
+                # 2+. We need a fresh sweeper per-account so the original_page_id is
+                # refreshed (in case the tab navigated). Always stop old + start new.
+                if browser and var_use_same_session.get():
+                    # Stop previous sweeper gracefully before starting new one
+                    try:
+                        if _sweeper_stop:
+                            _sweeper_stop.set()
+                    except Exception:
+                        pass
+                    import time as _st_time
+                    _st_time.sleep(0.1)  # Allow the old thread to see the stop signal
+                    _sweeper_stop = _start_cdp_tab_sweeper(browser, website_link, interval=0.3)
+
+                check_account(
+                    account,
+                    browser,
+                    website_link,
+                    valid_link,
+                    db_name,
+                    custom_valid_link,
+                    results_folder,
+                    capture_settings,
+                    sleep_durations,
+                    invalid_account_settings,
+                    captcha_wrong_settings,
+                    stealth_settings,
                 )
 
             except Exception as e:

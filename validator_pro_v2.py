@@ -34,6 +34,7 @@ import random
 import threading
 import getpass
 from engine.reporting.csv_exporter import SQLiteCSVExporter
+from engine.kernel.cleaner import SessionCleaner
 from datetime import datetime
 import json
 import webbrowser
@@ -9161,6 +9162,7 @@ Response MUST be a JSON object matching this exact format:
 
 def on_closing():
     """Handles window closing event."""
+    SessionCleaner.stop_daemon()
     save_settings()
     window.destroy()
 
@@ -11070,6 +11072,9 @@ def _startup_bg_thread():
     Main thread stays in mainloop() so the window is responsive and
     window.after(0, _append) events from print_action() are processed in real time.
     """
+    # Start the automated session integrity and cleanup daemon
+    SessionCleaner.start_daemon(interval_seconds=3600, base_dir="temp_sessions", max_age_seconds=3600)
+
     try:
         # ── Cookie Manager Integration ──
         try:

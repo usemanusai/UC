@@ -51,7 +51,7 @@ UC is a fully automated account-checking tool designed for modern, high-security
 | **Stealth & Mimicry** | Parametric Bézier cursor drift, Gaussian typing WPM modeling, machine HWID rotation, custom user-agents |
 | **Fallback Engine** | Explicit GUI configuration, native multithreaded heuristic dictionary, CDP-connected AI discovery |
 | **Discovery Squads** | CrewAI explorer/analyst/verifier squads, persistentheaded Rust browser 3-phase exploration loop |
-| **Session & Sandbox** | Same-session reuse, per-account temp profiles, Preferences file write-ahead seeding, toolbar pin synchronization |
+| **Session & Sandbox** | Same-session reuse, per-account temp profiles, Preferences file write-ahead seeding, toolbar pin synchronization, session integrity cleanup |
 | **Captcha Solvers** | rektCaptcha CRX auto-patching, Moodle and Shaparak resolvers, OCR cache database, local Claude completions proxy |
 | **Proxy Routing** | HTTP/HTTPS/SOCKS5, round-robin, random, and single-proxy mapping |
 | **Log Ingestion** | Bulk log importer matching password files with cookies, per-account SQLite ingestion |
@@ -71,10 +71,11 @@ accounts_checker_builder-main/
 ├── engine/
 │   ├── kernel/
 │   │   ├── browser_factory.py   # Chrome launch, retry logic, zombie cleanup
-│   │   ├── cleaner.py           # Browser close + profile cleanup
+│   │   ├── cleaner.py           # Automated Session Integrity & Cleanup Daemon
 │   │   ├── processor_v2.py      # Account processing pipeline
 │   │   ├── selector_discoverer.py  # AI-powered CSS selector discovery
 │   │   └── toolkit.py           # Shared utilities
+
 │   ├── core/
 │   │   ├── discovery_bridge.py  # Bridge between discovery + kernel
 │   │   └── discovery_schema.py  # Pydantic v2 schema definitions

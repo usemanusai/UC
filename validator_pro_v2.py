@@ -32,6 +32,8 @@ from colorama import Fore, Style
 import re
 import random
 import threading
+from engine.reporting.captcha_stats import CaptchaStatsManager
+
 import getpass
 from engine.reporting.csv_exporter import SQLiteCSVExporter
 from engine.core.cleanup_daemon import CleanupDaemon
@@ -1951,6 +1953,76 @@ def populate_db_from_log_scan(pairs: list, db_name: str) -> int:
 
 
 # --------------- Multi-Source Modal Dialog ------------------------------------
+
+
+class CaptchaStatsDashboard(tk.Toplevel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Local-first Captcha Solver Stats Dashboard")
+        self.geometry("600x400")
+        self.resizable(True, True)
+        self.transient(parent)
+        self.grab_set()
+
+        # Styles
+        style = ttk.Style(self)
+        style.configure("Stats.Treeview", font=("Inter", 10), rowheight=25)
+        style.configure("Stats.Treeview.Heading", font=("Inter", 10, "bold"))
+
+        # Title Label
+        ttk.Label(self, text="Captcha Solver Statistics", font=("Inter", 14, "bold")).pack(pady=10)
+
+        # Treeview
+        columns = ("service", "attempts", "successes", "failures", "success_rate", "avg_time")
+        self.tree = ttk.Treeview(self, columns=columns, show="headings", style="Stats.Treeview")
+
+        self.tree.heading("service", text="Service")
+        self.tree.heading("attempts", text="Attempts")
+        self.tree.heading("successes", text="Successes")
+        self.tree.heading("failures", text="Failures")
+        self.tree.heading("success_rate", text="Success Rate")
+        self.tree.heading("avg_time", text="Avg Time (s)")
+
+        self.tree.column("service", width=120, anchor="w")
+        self.tree.column("attempts", width=80, anchor="center")
+        self.tree.column("successes", width=80, anchor="center")
+        self.tree.column("failures", width=80, anchor="center")
+        self.tree.column("success_rate", width=100, anchor="center")
+        self.tree.column("avg_time", width=100, anchor="center")
+
+        self.tree.pack(fill="both", expand=True, padx=15, pady=10)
+
+        # Refresh Button
+        btn_frame = ttk.Frame(self)
+        btn_frame.pack(fill="x", padx=15, pady=10)
+        ttk.Button(btn_frame, text="Refresh", command=self.load_data).pack(side="right")
+
+        self.load_data()
+
+    def load_data(self):
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+
+        stats_manager = CaptchaStatsManager()
+        stats = stats_manager.get_stats()
+
+        for service, data in stats.items():
+            attempts = data.get("attempts", 0)
+            successes = data.get("successes", 0)
+            failures = data.get("failures", 0)
+            total_time = data.get("total_time", 0.0)
+
+            success_rate = f"{(successes / attempts * 100):.1f}%" if attempts > 0 else "N/A"
+            avg_time = f"{(total_time / attempts):.2f}" if attempts > 0 else "N/A"
+
+            self.tree.insert("", "end", values=(service.capitalize(), attempts, successes, failures, success_rate, avg_time))
+
+def open_captcha_stats_dashboard():
+    try:
+        dashboard = CaptchaStatsDashboard(window)
+    except Exception as e:
+        messagebox.showerror("Dashboard Error", f"Failed to open dashboard:\n{e}")
+
 
 class LogIngestionDialog(tk.Toplevel):
     """Multi-source log ingestion modal with real-time progress tracking.
@@ -10712,6 +10784,13 @@ ttk.Button(
     text="Export DB to CSV",
     command=export_db_to_csv,
 ).grid(column=0, row=3, padx=10, pady=5, sticky="w")
+
+ttk.Button(
+    frame_config,
+    text="View Captcha Stats",
+    command=open_captcha_stats_dashboard,
+).grid(column=0, row=4, padx=10, pady=5, sticky="w")
+
 CreateToolTip(frame_config.children["!button4"], "Export validation database to CSV.")
 
 ttk.Button(

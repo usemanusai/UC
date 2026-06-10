@@ -34,6 +34,7 @@ import random
 import threading
 import getpass
 from engine.reporting.csv_exporter import SQLiteCSVExporter
+from engine.core.cleanup_daemon import CleanupDaemon
 from datetime import datetime
 import json
 import webbrowser
@@ -9162,6 +9163,8 @@ Response MUST be a JSON object matching this exact format:
 def on_closing():
     """Handles window closing event."""
     save_settings()
+    if 'cleanup_daemon_instance' in globals():
+        cleanup_daemon_instance.stop()
     window.destroy()
 
 
@@ -11130,6 +11133,10 @@ def _startup_bg_thread():
 
 if __name__ == "__main__":
     try:
+        # Start the Automated Session Integrity & Cleanup Daemon
+        cleanup_daemon_instance = CleanupDaemon()
+        cleanup_daemon_instance.start()
+
         # Build and attach the terminal widget
         terminal_ui = DraggableTerminal(window, initial_width=550, initial_height=500)
         terminal_ui.place(x=800, y=60, width=550, height=500)

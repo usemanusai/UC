@@ -113,7 +113,6 @@ accounts_checker_builder-main/
 ├── discovery_squad/             # Headless TypeScript-based discovery agent
 ├── web-reader/                  # Web scanning and scraping skill module
 ├── web-search/                  # Google/DDG web search skill module
-├── web-shader-extractor/        # Canvas and WebGL shader signature extractor
 ├── browser_reinstaller.py       # One-click Chrome reinstall utility and HWID spoofer
 ├── extension_configurator.py    # CDP-based extension runtime configurator
 ├── human_jitter.py              # Keystroke timing humanizer
@@ -627,37 +626,6 @@ app.get('/api/search', async (req, res) => {
   }
 });
 ```
-
----
-
-##### III. Web Shader Extractor (`web-shader-extractor/`)
-The Web Shader Extractor is designed to analyze, extract, and de-obfuscate WebGL/Canvas shader visual effects from webpages and port them into standalone JS applications.
-
-###### 1. Core Principles
-- **1:1 Replication**: Verify correct visual and functional behavior before refactoring or simplifying.
-- **Autonomous Pipeline**: All extraction phases run strictly unattended except for user product decisions in Phase 6.
-
-###### 2. Detailed 7-Phase Workflow
-1. **Phase 0: Environment Precheck**: Verifies the presence of Node.js and automatically downloads Playwright Chromium dependencies using mirror proxies if needed.
-2. **Phase 1: Source Code Fetching**: Launches a headless Playwright instance alongside standard `curl` fetches to capture DOM snapshots (`dom.html`), active canvas metadata (`canvas-info.json`), network logs (`network.json`), console outputs, and screenshots.
-3. **Phase 2: Tech Stack Recognition**: Inspects `canvas-info.json` to identify the rendering framework:
-   - Three.js (including checking for TSL - Three Shading Language, in r170+)
-   - Babylon.js
-   - Raw WebGL (looking for `createShader`, `shaderSource` inside JS bundle)
-   - 2D Canvas (fallback to plain 2D rendering if WebGL functions are absent)
-4. **Phase 3: Configuration Extraction**: Extracts JSON parameters, Nuxt/Next payload structures (`__NEXT_DATA__`), and default JS parameters.
-5. **Phase 4: Shader Extraction & De-obfuscation**: Employs an agent-driven de-obfuscator to scan JavaScript bundles, extract GLSL structures, clean math expressions, and format variable tags.
-6. **Phase 5: Porting**: Builds a standalone HTML/JS project using a unified importmap structure:
-   - For全屏2D effects: ports directly to zero-dependency raw WebGL2.
-   - For 3D/PBR scenes: maintains original framework references via CDN scripts.
-7. **Phase 6: Simplification & Verification**: Executes a local browser test to take screenshots and compare rendering. Suggests framework simplification to the user.
-8. **Phase 7: Report Generation**: Generates an exhaustive `EXTRACTION-REPORT.md` compiling timeline, scene graphs, render passes, and key lessons.
-
-###### 3. Framework & Technical Reference Index
-The extractor maintains a library of signatures and patterns for known platforms:
-- **Unicorn Studio**: Curtains.js extraction via Firestore REST configs.
-- **shaders.com**: TSL-to-GLSL translation, XOR payload decoding, and Y-flip coordinate normalization.
-- **Three.js TSL**: Rebuilds nodes programmatically.
 
 ---
 

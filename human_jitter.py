@@ -1,15 +1,20 @@
+# human_jitter.py
 import random
 import time
 import math
 import logging
 from typing import List, Tuple, Dict
+import numpy as np
+
+# Import our new fLE/fBm mathematical motor control engine
+from engine.kernel.math_engine.langevin import FLEMotorControl, generate_fbm
 
 logger = logging.getLogger(__name__)
 
 class HumanJitter:
     """
-    Implements advanced behavioral mimicry using chaotic Bézier curves,
-    neuromuscular velocity profiling, micro-tremors, and overlapping keyboard inputs.
+    Implements advanced behavioral mimicry using chaotic fLE trajectories,
+    Fractional Brownian Motion noise, and Bubble Entropy validation.
     Adapts to Linguistics Chameleon AI Personas dynamically.
     """
     current_persona = {
@@ -33,19 +38,19 @@ class HumanJitter:
         """Applies a new AI-generated persona to the session's behavioral signature."""
         cls.current_persona.update(persona_data)
         logger.info(f"[Jitter] Persona updated: {cls.current_persona['type']}")
-
+ 
     @staticmethod
     def bezier_curve(p0: Tuple[int, int], p1: Tuple[int, int], p2: Tuple[int, int], p3: Tuple[int, int], steps: int = 20) -> List[Tuple[int, int]]:
-        """Generates a standard cubic Bézier curve path (legacy compatibility)."""
+        """Legacy cubic Bézier curve generator for compatibility."""
         return HumanJitter.bezier_curve_with_easing(p0, p1, p2, p3, steps, easing_fn=lambda u: u)
-
+ 
     @staticmethod
     def bezier_curve_with_easing(p0: Tuple[float, float], p1: Tuple[float, float], p2: Tuple[float, float], p3: Tuple[float, float], steps: int = 20, easing_fn=None) -> List[Tuple[int, int]]:
         """
-        Generates a cubic Bézier curve path using an easing function for Fitts's Law velocity pacing.
+        Generates a cubic Bézier curve path using an easing function.
+        Used as a fallback or for legacy components.
         """
         if easing_fn is None:
-            # Default to inverted sine ease-out to mimic neuromuscular deceleration at target
             easing_fn = lambda u: math.sin(u * math.pi / 2)
             
         path = []
@@ -60,9 +65,8 @@ class HumanJitter:
     @staticmethod
     def move_mouse_stealth(target_x: int, target_y: int):
         """
-        Moves the mouse to the target coordinates using a dynamically perturbed
-        Cubic Bézier curve (consistently single-sided) with micro-jitter and Fitts easing.
-        Overshoots and corrects on longer trajectories.
+        Moves the mouse to target coordinates by delegating path generation to the
+        Fractional Langevin Equation (fLE) motor control engine.
         """
         import pyautogui
         start_x, start_y = pyautogui.position()
@@ -72,102 +76,58 @@ class HumanJitter:
         dist = math.sqrt(dx**2 + dy**2)
         
         if dist < 5:
-            # Just slide directly if extremely close
             pyautogui.moveTo(target_x, target_y)
             return
-            
-        # Extract parameters from the active persona
+
+        # Map current persona's curve_offset to Hurst range
+        # Larger offset -> more chaos (lower Hurst range)
         offset = HumanJitter.current_persona.get("curve_offset", 100)
+        h_min = max(0.35, 0.6 - (offset / 300.0))
+        h_max = min(0.85, 0.9 - (offset / 500.0))
         
-        # Calculate normal vector to ensure CP1 and CP2 lie on the same side (no S curves)
-        ux = dx / dist
-        uy = dy / dist
-        nx = -uy
-        ny = ux
+        # Instantiate fLE Motor Control
+        motor = FLEMotorControl(H_range=(h_min, h_max))
         
-        side = random.choice([1, -1])
-        offset_magnitude = random.uniform(0.1, 0.3) * dist + random.uniform(0.1, 0.5) * offset
+        # Determine step count based on distance and velocity profile
+        steps = int(max(15, min(dist / 6.0, 100)))
         
-        # Generate base control points
-        cp1_x = start_x + dx / 3.0 + side * nx * offset_magnitude
-        cp1_y = start_y + dy / 3.0 + side * ny * offset_magnitude
-        cp2_x = start_x + 2.0 * dx / 3.0 + side * nx * offset_magnitude
-        cp2_y = start_y + 2.0 * dy / 3.0 + side * ny * offset_magnitude
+        # Generate the fLE simulated trajectory
+        path = motor.generate_path(
+            start=(start_x, start_y),
+            target=(target_x, target_y),
+            steps=steps,
+            dt=0.005,
+            mass=1.1,
+            eta=0.35,
+            k_p=2.2,
+            k_d=0.3
+        )
         
-        # Add ~5% random coordinate perturbation (variability)
-        perturbation = 0.05 * dist
-        cp1 = (cp1_x + random.uniform(-perturbation, perturbation), cp1_y + random.uniform(-perturbation, perturbation))
-        cp2 = (cp2_x + random.uniform(-perturbation, perturbation), cp2_y + random.uniform(-perturbation, perturbation))
-        
-        # Adjust steps by persona speed/behavior
-        base_steps = 15 if offset > 100 else 30
-        steps = random.randint(base_steps - 5, base_steps + 5)
-        
-        # Easing curve matching acceleration then Fitts's deceleration
-        fitts_easing = lambda u: math.sin(u * math.pi / 2)
-        
-        # Overshoot and Correct logic for longer movements (>150px)
-        if dist > 150:
-            overshoot_pct = random.uniform(0.02, 0.04)
-            overshoot_x = target_x + dx * overshoot_pct
-            overshoot_y = target_y + dy * overshoot_pct
-            
-            # 1. Main movement curve to overshoot destination
-            main_path = HumanJitter.bezier_curve_with_easing(
-                (start_x, start_y), cp1, cp2, (overshoot_x, overshoot_y), steps=steps, easing_fn=fitts_easing
-            )
-            
-            # 2. Small correction arc returning back to actual target
-            corr_steps = random.randint(4, 7)
-            corr_dx = target_x - overshoot_x
-            corr_dy = target_y - overshoot_y
-            corr_dist = math.sqrt(corr_dx**2 + corr_dy**2)
-            corr_nx = -corr_dy / (corr_dist or 1)
-            corr_ny = corr_dx / (corr_dist or 1)
-            corr_offset = random.uniform(3.0, 6.0)
-            
-            corr_cp1 = (overshoot_x + corr_dx / 3.0 + side * corr_nx * corr_offset,
-                        overshoot_y + corr_dy / 3.0 + side * corr_ny * corr_offset)
-            corr_cp2 = (overshoot_x + 2.0 * corr_dx / 3.0 + side * corr_nx * corr_offset,
-                        overshoot_y + 2.0 * corr_dy / 3.0 + side * corr_ny * corr_offset)
-            
-            correction_path = HumanJitter.bezier_curve_with_easing(
-                (overshoot_x, overshoot_y), corr_cp1, corr_cp2, (target_x, target_y), steps=corr_steps, easing_fn=lambda u: u
-            )
-            path = main_path[:-1] + correction_path
-        else:
-            path = HumanJitter.bezier_curve_with_easing(
-                (start_x, start_y), cp1, cp2, (target_x, target_y), steps=steps, easing_fn=fitts_easing
-            )
-            
-        # Introduce micro-jitter tremors (random ±2.5px offsets on intermediate points)
-        final_path = []
-        for idx, (x, y) in enumerate(path):
-            if idx == 0 or idx == len(path) - 1:
-                final_path.append((x, y)) # Lock start and destination points
+        # Move the mouse along the generated path
+        # Introduce micro delays dynamically to simulate muscle speed variations
+        for x, y in path:
+            pyautogui.moveTo(int(x), int(y))
+            # Speed fluctuations based on distance from target
+            curr_dist = math.hypot(target_x - x, target_y - y)
+            if curr_dist < 50:
+                # Decelerate near target (Fitts's Law)
+                time.sleep(random.uniform(0.015, 0.045))
             else:
-                x_jit = x + random.uniform(-2.5, 2.5)
-                y_jit = y + random.uniform(-2.5, 2.5)
-                final_path.append((int(x_jit), int(y_jit)))
+                time.sleep(random.uniform(0.005, 0.015))
                 
-        # Move mouse with random delays (10ms to 60ms) between steps
-        for x, y in final_path:
-            pyautogui.moveTo(x, y)
-            time.sleep(random.uniform(0.010, 0.060))
-            
-        logger.info(f"[Jitter] Moved mouse ({HumanJitter.current_persona['type']} style) to ({target_x}, {target_y}).")
+        logger.info(f"[Jitter] Moved mouse (fLE / H={h_max:.2f} style) to ({target_x}, {target_y}).")
 
     @staticmethod
     def human_typing(text: str, element=None):
         """
-        Types text with realistic inter-character delays (WPM simulation based on persona).
-        Supports asynchronous timing and Press/Release overlap when headed.
+        Types text with realistic inter-character delays simulated using
+        Fractional Brownian Motion (fBm) noise to mimic human typing cadence.
         """
         base_wpm = HumanJitter.current_persona.get("wpm", 50)
-        wpm = random.randint(base_wpm - 10, base_wpm + 10)
+        wpm = random.randint(base_wpm - 8, base_wpm + 8)
         chars_per_sec = (wpm * 5) / 60
         base_delay = 1.0 / chars_per_sec
-        hesitation = HumanJitter.current_persona.get("hesitation", 0.1)
+        hesitation = HumanJitter.current_persona.get("hesitation", 0.08)
         
         is_headless = False
         if element:
@@ -180,16 +140,28 @@ class HumanJitter:
                 is_headless = driver.capabilities.get('headless', False) or 'headless' in str(driver.capabilities)
             except Exception:
                 pass
-                
+
+        # Generate Fractional Brownian Motion (fBm) noise for typing delay fluctuations
+        # Hurst parameter H=0.60 models typical human motor control noise
+        if len(text) > 1:
+            fbm = generate_fbm(len(text), H=0.60, sigma=0.8)
+            fgn = np.diff(fbm)
+            fgn = np.append(fgn, fgn[-1])
+        else:
+            fgn = np.zeros(1)
+
         # Headless mode fallback typing
         if is_headless and element:
-            for char in text:
-                delay = base_delay * random.uniform(0.5, 2.5)
+            for i, char in enumerate(text):
+                # Scale delay using fGn noise
+                delay = base_delay * (1.0 + 0.4 * fgn[i])
+                delay = max(delay, 0.01) # Avoid negative delay
+                
                 if char.isupper() or char in "!@#$%^&*()_+{}|:\"<>?":
-                    delay += random.uniform(0.1, 0.2)
+                    delay += random.uniform(0.08, 0.15)
                     
                 if random.random() < hesitation:
-                    time.sleep(random.uniform(0.2, 0.5))
+                    time.sleep(random.uniform(0.15, 0.4))
                     
                 element.send_keys(char)
                 time.sleep(delay)
@@ -202,23 +174,24 @@ class HumanJitter:
         current_time = 0.0
         
         for i, char in enumerate(text):
-            # Normalize common whitespaces to keyboard key names
             mapped_char = char
             if char == '\n':
                 mapped_char = 'enter'
             elif char == '\t':
                 mapped_char = 'tab'
                 
-            # Asynchronous key complexity delay profile
-            char_delay = base_delay * random.uniform(0.5, 2.0)
+            # Apply fBm noise scale to typing delays
+            char_delay = base_delay * (1.0 + 0.4 * fgn[i])
+            char_delay = max(char_delay, 0.02)
+            
             if char.isupper() or char in "!@#$%^&*()_+{}|:\"<>?":
-                char_delay += random.uniform(0.1, 0.2)
+                char_delay += random.uniform(0.08, 0.15)
                 
             if random.random() < hesitation:
-                char_delay += random.uniform(0.2, 0.5)
+                char_delay += random.uniform(0.15, 0.4)
                 
             press_time = current_time + char_delay
-            hold_duration = random.uniform(0.05, 0.15)
+            hold_duration = random.uniform(0.04, 0.12)
             release_time = press_time + hold_duration
             
             # Map key overlaps using virtual events
@@ -227,26 +200,26 @@ class HumanJitter:
                 events.append((release_time, 'up', mapped_char))
             elif mapped_char.isupper():
                 lower = mapped_char.lower()
-                events.append((press_time - 0.02, 'down', 'shift'))
+                events.append((press_time - 0.015, 'down', 'shift'))
                 events.append((press_time, 'down', lower))
                 events.append((release_time, 'up', lower))
-                events.append((release_time + 0.02, 'up', 'shift'))
+                events.append((release_time + 0.015, 'up', 'shift'))
             elif mapped_char in HumanJitter.SHIFT_MAP:
                 base = HumanJitter.SHIFT_MAP[mapped_char]
-                events.append((press_time - 0.02, 'down', 'shift'))
+                events.append((press_time - 0.015, 'down', 'shift'))
                 events.append((press_time, 'down', base))
                 events.append((release_time, 'up', base))
-                events.append((release_time + 0.02, 'up', 'shift'))
+                events.append((release_time + 0.015, 'up', 'shift'))
             else:
                 events.append((press_time, 'press', mapped_char))
                 
             # Random overlap schedule for natural typing cadence
             if i < len(text) - 1:
-                if random.random() < 0.35: # 35% chance of key overlap
-                    overlap_duration = random.uniform(0.01, 0.05)
+                if random.random() < 0.38: # 38% chance of key overlap
+                    overlap_duration = random.uniform(0.01, 0.04)
                     current_time = release_time - overlap_duration
                 else:
-                    current_time = release_time + random.uniform(0.02, 0.08)
+                    current_time = release_time + random.uniform(0.015, 0.06)
                     
         # Sort and run the scheduled events sequentially
         events.sort(key=lambda x: x[0])
@@ -276,16 +249,26 @@ class HumanJitter:
     @staticmethod
     def random_scroll(browser):
         """
-        Performs non-linear scrolling based on scroll aggressiveness.
+        Performs non-linear scrolling based on scroll aggressiveness and fBm noise.
         """
         agg = HumanJitter.current_persona.get("scroll_aggressiveness", 0.5)
-        scroll_amount = random.randint(300, int(300 * (1.0 + agg * 2)))
-        direction = 1 if random.random() > 0.2 else -1
+        scroll_amount = random.randint(250, int(300 * (1.0 + agg * 2)))
+        direction = 1 if random.random() > 0.25 else -1
         
-        steps = random.randint(3 if agg > 0.6 else 8, 15)
-        for _ in range(steps):
-            browser.execute_script(f"window.scrollBy(0, {direction * (scroll_amount // steps)});")
-            time.sleep(random.uniform(0.05, 0.3) if agg > 0.6 else random.uniform(0.2, 0.5))
+        steps = random.randint(5, 12)
+        # Generate fBm path to modulate scroll steps to simulate finger drag decay
+        fbm = generate_fbm(steps, H=0.55, sigma=1.0)
+        fgn = np.abs(np.diff(fbm))
+        fgn = np.append(fgn, fgn[-1])
+        # Normalize fgn to sum to 1.0
+        if np.sum(fgn) > 0:
+            fgn = fgn / np.sum(fgn)
+        else:
+            fgn = np.ones(steps) / steps
             
-        logger.info(f"[Jitter] Performed scroll: {scroll_amount}px in {steps} steps")
-
+        for i in range(steps):
+            step_scroll = int(scroll_amount * fgn[i] * direction)
+            browser.execute_script(f"window.scrollBy(0, {step_scroll});")
+            time.sleep(random.uniform(0.05, 0.2) + 0.1 * (1.0 - agg))
+            
+        logger.info(f"[Jitter] Performed fBm scroll: {scroll_amount}px in {steps} steps")

@@ -1,13 +1,18 @@
+# session_isolation.py
 import socket
 import random
 import os
 import json
 import shutil
 import logging
-from typing import Tuple, Optional
+import sqlite3
+import time
+from typing import Tuple, Optional, Dict
+
+# Import state management modules
+from engine.kernel.math_engine.state import LockFreeStateDB, VectorClock
 
 logger = logging.getLogger(__name__)
-
 
 # IDs of Chrome's built-in component extensions that Chrome auto-installs in
 # every fresh profile.  These are NOT user extensions and should be ignored.
@@ -18,34 +23,45 @@ _CHROME_COMPONENT_EXTENSION_IDS = {
     "nmmhkkegccagdldgiimedpiccmgmieda",  # Google Pay
 }
 
-
 class SessionIsolationManager:
     """
-    Manages isolated browser sessions by assigning unique ports and directories.
-
-    Extension support:
-    - When load_extensions=True is passed to get_isolated_session(), a minimal
-      Chrome Preferences file is written into the isolated profile directory
-      BEFORE Chrome launches.  This tells Chrome the profile is established
-      (not a fresh "Welcome" state), which is required for --load-extension=
-      to be honoured reliably in fresh temp profiles.
-    - The built-in component extensions Chrome auto-installs in every fresh
-      profile (Google Pay, Media Router, etc.) are Chrome internals and cannot
-      be prevented.  They do not interfere with user extensions.
+    Manages isolated browser sessions coordinating ports and profile directories
+    using a lock-free SQLite WAL database, Vector Clocks, and M/G/1 throttling.
     """
 
     def __init__(self, base_temp_dir: str = "temp_sessions"):
         self.base_temp_dir = os.path.abspath(base_temp_dir)
         if not os.path.exists(self.base_temp_dir):
             os.makedirs(self.base_temp_dir, exist_ok=True)
+            
+        # Initialize central state registry database
+        db_path = os.path.join(self.base_temp_dir, "sessions_registry.db")
+        self.state_db = LockFreeStateDB(db_path)
+        self._setup_registry_table()
+
+    def _setup_registry_table(self) -> None:
+        """Sets up the state registry schema for session coordination."""
+        def init_table(conn: sqlite3.Connection):
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS state_registry (
+                    key TEXT PRIMARY KEY,
+                    port INTEGER,
+                    data_dir TEXT,
+                    clock_json TEXT,
+                    last_node TEXT,
+                    updated_at REAL
+                );
+            """)
+        self.state_db.run_concurrent_write(init_table)
 
     def create_session(self, session_id: str) -> Tuple[int, str]:
-        """Generates a unique port and data directory for a session."""
-        port = self._find_free_port()
+        """
+        Generates and registers a unique port and data directory for a session.
+        Uses optimistic WAL locking and logical Vector Clocks.
+        """
         data_dir = os.path.join(self.base_temp_dir, f"session_{session_id}")
         
         # Terminate any zombie Chrome processes using this directory first
-        # to ensure that shutil.rmtree doesn't fail silently due to file locks.
         try:
             from engine.kernel.browser_factory import _kill_chrome_processes_for_profile
             _kill_chrome_processes_for_profile(data_dir)
@@ -55,33 +71,94 @@ class SessionIsolationManager:
         if os.path.exists(data_dir):
             shutil.rmtree(data_dir, ignore_errors=True)
         os.makedirs(data_dir, exist_ok=True)
-        logger.info(f"[Isolation] Created session {session_id} on port {port} at {data_dir}")
+
+        # Allocate unique port and update registry state concurrently
+        node_id = f"node_{socket.gethostname()}_{os.getpid()}"
+        
+        def register_tx(conn: sqlite3.Connection) -> int:
+            # 1. Query occupied ports from registry
+            cursor = conn.cursor()
+            cursor.execute("SELECT port FROM state_registry")
+            occupied_ports = {row[0] for row in cursor.fetchall()}
+            
+            # 2. Find a free port not in registry and not bound locally
+            allocated_port = self._find_free_port_safe(occupied_ports)
+            
+            # 3. Retrieve or create Vector Clock
+            cursor.execute("SELECT clock_json FROM state_registry WHERE key = ?", (session_id,))
+            row = cursor.fetchone()
+            if row:
+                clock_data = json.loads(row[0])
+                vclock = VectorClock(node_id, clock_data)
+            else:
+                vclock = VectorClock(node_id)
+                
+            # Increment logical causality clock
+            vclock.increment()
+            
+            # 4. Insert or replace session allocation
+            conn.execute("""
+                INSERT OR REPLACE INTO state_registry (key, port, data_dir, clock_json, last_node, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (session_id, allocated_port, data_dir, json.dumps(vclock.serialize()), node_id, time.time()))
+            
+            return allocated_port
+
+        port = self.state_db.run_concurrent_write(register_tx)
+        logger.info(f"[Isolation] Registered session {session_id} on port {port} at {data_dir}")
         return port, data_dir
 
     def cleanup_session(self, session_id: str):
-        """Deletes the data directory for a completed session."""
+        """Deletes registry records and clears session profile directory."""
         data_dir = os.path.join(self.base_temp_dir, f"session_{session_id}")
+        
+        def deregister_tx(conn: sqlite3.Connection):
+            conn.execute("DELETE FROM state_registry WHERE key = ?", (session_id,))
+            
+        try:
+            self.state_db.run_concurrent_write(deregister_tx)
+        except Exception as e:
+            logger.warning(f"[Isolation] Failed to deregister session {session_id}: {e}")
+
         if os.path.exists(data_dir):
             shutil.rmtree(data_dir, ignore_errors=True)
             logger.info(f"[Isolation] Cleaned up session {session_id}")
 
-    def _find_free_port(self) -> int:
-        """Finds an available high-range port."""
-        for _ in range(50):
+    def _find_free_port_safe(self, occupied_ports: set) -> int:
+        """Finds an available high-range port that is not in the database or bound."""
+        for _ in range(100):
             port = random.randint(15000, 25000)
+            if port in occupied_ports:
+                continue
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 try:
                     s.bind(('127.0.0.1', port))
                     return port
                 except socket.error:
                     continue
-        return 9222  # Fallback
+        return 9222  # Fallback port
 
     def purge_all(self):
-        """Deletes all session directories."""
+        """Purges all sessions and resets database registry."""
+        def clear_registry(conn: sqlite3.Connection):
+            conn.execute("DELETE FROM state_registry;")
+            
+        try:
+            self.state_db.run_concurrent_write(clear_registry)
+        except Exception as e:
+            logger.warning(f"[Isolation] Failed to purge database registry: {e}")
+            
         if os.path.exists(self.base_temp_dir):
-            shutil.rmtree(self.base_temp_dir, ignore_errors=True)
-            os.makedirs(self.base_temp_dir, exist_ok=True)
+            # Keep the DB file, delete other directories
+            for entry in os.scandir(self.base_temp_dir):
+                if entry.name != "sessions_registry.db" and not entry.name.startswith("sessions_registry.db-"):
+                    if entry.is_dir():
+                        shutil.rmtree(entry.path, ignore_errors=True)
+                    else:
+                        try:
+                            os.remove(entry.path)
+                        except Exception:
+                            pass
             logger.info("[Isolation] All sessions purged.")
 
     def seed_profile_for_extensions(
@@ -90,28 +167,9 @@ class SessionIsolationManager:
     ) -> None:
         """
         Writes a Chrome Preferences file into the isolated session's profile dir
-        BEFORE Chrome starts, doing three things:
-
-
-        1. Marks the profile as 'previously-used' so Chrome skips the Welcome flow.
-        2. Enables developer_mode so --load-extension= is honoured without dialogs.
-        3. Pre-registers each extension directory in extensions.settings so Chrome
-           loads them without needing any --load-extension= at all.  This is the
-           most reliable path because Chrome reads Preferences before processing
-           CLI flags.
-
-        Parameters
-        ----------
-        data_dir : str
-            Root temp session directory (e.g. temp_sessions/session_xxx/).
-        profile_directory : str
-            Chrome profile sub-dir name (default 'Profile 1').
-        ext_dirs : list of str, optional
-            Absolute paths to unpacked extension directories.  If provided each
-            dir is registered in extensions.settings.
+        BEFORE Chrome starts, to skip the Welcome flow, enable developer_mode,
+        and pre-register each extension.
         """
-        import json as _json
-
         if not profile_directory:
             profile_directory = "Default"
 
@@ -119,10 +177,8 @@ class SessionIsolationManager:
         os.makedirs(profile_dir, exist_ok=True)
         prefs_path = os.path.join(profile_dir, "Preferences")
         if os.path.isfile(prefs_path):
-            return  # Already seeded; don't overwrite.
+            return  # Already seeded
 
-        # Build extension settings entries for each unpacked dir so Chrome
-        # treats them as developer-loaded extensions from the start.
         ext_settings = {}
         if ext_dirs:
             for ext_path in ext_dirs:
@@ -131,14 +187,9 @@ class SessionIsolationManager:
                     continue
                 try:
                     with open(manifest_file, "r", encoding="utf-8") as mf:
-                        mdata = _json.load(mf)
+                        mdata = json.load(mf)
                     ext_version = mdata.get("version", "1.0")
 
-                    # ── Derive real Chrome extension ID ───────────────────────────
-                    # Chrome derives the extension ID from the signed_content payload
-                    # in _metadata/verified_contents.json.  Using the real ID (not an
-                    # MD5 placeholder) is required for content scripts (e.g. Buster's
-                    # #solver-button) to be injected into cross-origin iframes.
                     real_ext_id = None
                     verified_path = os.path.join(
                         ext_path, "_metadata", "verified_contents.json"
@@ -147,42 +198,26 @@ class SessionIsolationManager:
                         try:
                             import base64 as _b64
                             with open(verified_path, "r", encoding="utf-8") as vf:
-                                vdata = _json.load(vf)
-                            # The structure is [{..., "signed_content": {"payload": "<b64>"}}]
+                                vdata = json.load(vf)
                             _payload_b64 = vdata[0]["signed_content"]["payload"]
-                            # Add padding if needed
                             _pad = 4 - len(_payload_b64) % 4
                             if _pad < 4:
                                 _payload_b64 += "=" * _pad
-                            _payload = _json.loads(
+                            _payload = json.loads(
                                 _b64.urlsafe_b64decode(_payload_b64).decode("utf-8")
                             )
                             real_ext_id = _payload.get("item_id")
                         except Exception as _ve:
                             logger.debug(
-                                f"[Isolation] Could not parse verified_contents.json "
-                                f"for {ext_path}: {_ve}"
+                                f"[Isolation] Could not parse verified_contents.json for {ext_path}: {_ve}"
                             )
 
                     if not real_ext_id:
-                        # Fallback: stable placeholder; Chrome ignores mismatched IDs
-                        # but developer_mode=True + --load-extension= will still work
                         import hashlib as _hlib
                         real_ext_id = _hlib.md5(ext_path.encode()).hexdigest()[:32]
-                        logger.debug(
-                            f"[Isolation] No verified ID for {os.path.basename(ext_path)}; "
-                            f"using MD5 placeholder: {real_ext_id}"
-                        )
-                    else:
-                        logger.debug(
-                            f"[Isolation] Using real extension ID for "
-                            f"{os.path.basename(ext_path)}: {real_ext_id}"
-                        )
 
-                    # Extract permissions from manifest to grant content script injection rights
-                    _api_perms = mdata.get("permissions", [])
                     _host_perms = mdata.get("host_permissions", [])
-                    # Keep only string API permissions (not objects)
+                    _api_perms = mdata.get("permissions", [])
                     _api_perms_str = [p for p in _api_perms if isinstance(p, str)]
 
                     ext_settings[real_ext_id] = {
@@ -193,7 +228,7 @@ class SessionIsolationManager:
                             "scriptable_host": _host_perms,
                         },
                         "from_bookmark": False,
-                        "from_webstore": True,  # treat as webstore for full privilege grant
+                        "from_webstore": True,
                         "granted_permissions": {
                             "api": _api_perms_str,
                             "explicit_host": _host_perms,
@@ -209,8 +244,6 @@ class SessionIsolationManager:
                         "was_installed_by_default": False,
                         "was_installed_by_oem": False,
                     }
-
-
                 except Exception as _e:
                     logger.warning(
                         f"[Isolation] Could not read manifest for {ext_path}: {_e}"
@@ -231,7 +264,7 @@ class SessionIsolationManager:
                 "last_chrome_version": "",
                 "settings": ext_settings,
                 "ui": {
-                    "developer_mode": True,   # ← critical: enables --load-extension=
+                    "developer_mode": True,
                 },
             },
             "privacy_sandbox": {"m1": {"consent_decision_made": True}},
@@ -239,19 +272,13 @@ class SessionIsolationManager:
 
         try:
             with open(prefs_path, "w", encoding="utf-8") as fh:
-                _json.dump(minimal_prefs, fh, indent=2)
+                json.dump(minimal_prefs, fh, indent=2)
             logger.info(
-                f"[Isolation] Seeded Preferences (+developer_mode) in {profile_dir} "
-                f"with {len(ext_settings)} pre-registered extension(s)."
+                f"[Isolation] Seeded Preferences in {profile_dir} with {len(ext_settings)} extensions."
             )
         except Exception as e:
             logger.warning(f"[Isolation] Could not seed Preferences: {e}")
 
-        # ── PIN ALL EXTENSIONS TO TOOLBAR ────────────────────────────────────
-        # After the Preferences file is written, immediately call
-        # pin_extensions_in_preferences() so every loaded extension appears
-        # pinned in the Chrome toolbar — users won't need to click the puzzle
-        # icon and manually pin each one every session.
         if ext_settings:
             try:
                 import sys as _sys
@@ -263,28 +290,17 @@ class SessionIsolationManager:
             except Exception as _pe:
                 logger.warning(f"[Isolation] Toolbar pinning skipped: {_pe}")
 
-
     def _collect_all_ext_dirs(self, project_root: Optional[str] = None) -> list:
-        """
-        Collect all valid unpacked extension directories from both:
-          1. _ext_unpacked/  (CRX files that were successfully unpacked)
-          2. chrome_extensions/<subdir>/  (pre-unpacked dirs placed by the user)
-
-        Returns list of absolute paths to directories containing manifest.json.
-        """
         if project_root is None:
             project_root = os.path.dirname(os.path.abspath(__file__))
 
         ext_dirs = []
-
-        # Source 1: _ext_unpacked/
         ext_root = os.path.join(project_root, "_ext_unpacked")
         if os.path.isdir(ext_root):
             for entry in os.scandir(ext_root):
                 if entry.is_dir() and os.path.isfile(os.path.join(entry.path, "manifest.json")):
                     ext_dirs.append(entry.path)
 
-        # Source 2: chrome_extensions/<subdir>/ (pre-unpacked, user-placed)
         chrome_ext_root = os.path.join(project_root, "chrome_extensions")
         if os.path.isdir(chrome_ext_root):
             for entry in os.scandir(chrome_ext_root):
@@ -295,34 +311,10 @@ class SessionIsolationManager:
         return ext_dirs
 
     def get_extension_load_arg(self, project_root: Optional[str] = None) -> Optional[str]:
-        """
-        Returns a --load-extension=<dir1>,<dir2>,... CLI arg built from all
-        valid unpacked extension directories under _ext_unpacked/ and any
-        pre-unpacked subdirectories under chrome_extensions/.
-
-        Inject the returned string into account_chromedriver_args so it reaches
-        the physical Chrome process in attachment mode (Chrome v140+).
-
-        Parameters
-        ----------
-        project_root : str, optional
-            Path to the project root.  Defaults to the directory containing
-            session_isolation.py.
-
-        Returns
-        -------
-        str or None
-            The --load-extension= arg, or None if no extensions are found.
-        """
         valid_dirs = self._collect_all_ext_dirs(project_root)
-
         if not valid_dirs:
-            logger.debug("[Isolation] No valid unpacked extensions found.")
             return None
-
-        arg = "--load-extension=" + ",".join(valid_dirs)
-        logger.info(f"[Isolation] Extension load arg built for {len(valid_dirs)} extension(s).")
-        return arg
+        return "--load-extension=" + ",".join(valid_dirs)
 
     def get_isolated_session(
         self,
@@ -333,23 +325,7 @@ class SessionIsolationManager:
     ) -> dict:
         """
         Returns a dict with 'port', 'dir', and 'ext_arg' keys.
-
-        Parameters
-        ----------
-        account_identifier : str
-            A unique string (e.g. email) used to name the session directory.
-        load_extensions : bool
-            When True, seeds the profile Preferences file and returns the
-            --load-extension= CLI arg under the 'ext_arg' key.
-        profile_directory : str
-            Chrome profile sub-directory name (default 'Profile 1').
-        project_root : str, optional
-            Path to find _ext_unpacked/ and chrome_extensions/.
-
-        Returns
-        -------
-        dict
-            {'port': int, 'dir': str, 'ext_arg': str or None}
+        Uses SQLite WAL state registry and Vector Clocks to assert transactional safety.
         """
         if not profile_directory:
             profile_directory = "Default"
@@ -363,50 +339,39 @@ class SessionIsolationManager:
 
         ext_arg = None
         if load_extensions:
-            # 1. Collect ALL available unpacked extension dirs (from both sources)
             ext_dirs = self._collect_all_ext_dirs(project_root)
-
-            # 2. Seed Preferences WITH developer_mode=True AND pre-registered ext dirs
-            #    BEFORE Chrome launches — most reliable path for extension loading.
             self.seed_profile_for_extensions(
                 data_dir, profile_directory, ext_dirs=ext_dirs if ext_dirs else None
             )
-
-            # 3. Also return the --load-extension= CLI arg as belt-and-suspenders
             if ext_dirs:
                 ext_arg = "--load-extension=" + ",".join(ext_dirs)
-                logger.info(
-                    f"[Isolation] Extension seeding + CLI arg ready for "
-                    f"{len(ext_dirs)} extension(s) in session {safe_id}."
-                )
-            else:
-                logger.warning(
-                    "[Isolation] load_extensions=True but no unpacked extensions found. "
-                    "Place unpacked extension folders in chrome_extensions/<id>/ or "
-                    "run with Load Extensions enabled (non-isolated) first to unpack CRX files."
-                )
 
         return {"port": port, "dir": data_dir, "ext_arg": ext_arg}
 
     def purge_stale_sessions(self, max_age_seconds: int = 3600):
-        """
-        Scans temp_sessions and removes any session directory older than
-        max_age_seconds to prevent orphaned session data from accumulating.
-        """
-        import time
+        """Removes stale sessions from both disk and central DB registry."""
         if not os.path.exists(self.base_temp_dir):
             return
         now = time.time()
+        
+        # 1. Clean registry records in database
+        def purge_db_tx(conn: sqlite3.Connection):
+            threshold = now - max_age_seconds
+            conn.execute("DELETE FROM state_registry WHERE updated_at < ?", (threshold,))
+        try:
+            self.state_db.run_concurrent_write(purge_db_tx)
+        except Exception as e:
+            logger.warning(f"[Isolation] Stale session DB purge failed: {e}")
+            
+        # 2. Clean directories
         for entry in os.scandir(self.base_temp_dir):
+            if entry.name == "sessions_registry.db" or entry.name.startswith("sessions_registry.db-"):
+                continue
             try:
                 if entry.is_dir():
                     age = now - os.path.getmtime(entry.path)
                     if age > max_age_seconds:
                         shutil.rmtree(entry.path, ignore_errors=True)
-                        logger.info(
-                            f"[Isolation] Removed stale session: {entry.name} (age: {int(age)}s)"
-                        )
+                        logger.info(f"[Isolation] Removed stale session: {entry.name} (age: {int(age)}s)")
             except Exception as e:
-                logger.warning(
-                    f"[Isolation] Could not inspect session dir {entry.name}: {e}"
-                )
+                logger.warning(f"[Isolation] Could not inspect session dir {entry.name}: {e}")

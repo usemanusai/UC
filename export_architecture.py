@@ -2,14 +2,13 @@ import os
 import re
 import sys
 
-# Mermaid diagrams to inject at the top of the export markdown
 MERMAID_DIAGRAMS = """# UC System Architecture & Structural Flows
 
 ## 1. High-Level Architecture Diagram
 ```mermaid
 graph TD
     UI[Tkinter GUI: validator_pro_v2.py]
-    EDF[EDF Priority Scheduler: scheduler.py]
+    EDF[Expected-Utility Scheduler: scheduler.py]
     SI[Session Isolation Manager: session_isolation.py]
     BF[Browser Factory: browser_factory.py]
     HE[Heuristic CSS Engine: heuristics.py]
@@ -50,9 +49,12 @@ sequenceDiagram
             V->>T: Retrieve page DOM Tree (Tier 3)
             T->>C: Extract current accessibility / DOM tree
             C-->>T: Return target DOM Node tree
-            T->>T: Compute Tree Edit Distance (ZSS) against reference template
+            T->>T: Prune tree & filter subtrees via SimHash (Hamming <= 25)
+            T->>T: Compute ZSS Tree Edit Distance on candidate pairs
             T->>T: Verify Lipschitz Continuity Constraint (L2C2) on coordinates
             T-->>V: Return closest structural match
+            V->>V: Verify element render-time visibility, size, and coordinates
+            V->>V: Run click pre-testing (mouseover mutation verification)
             V->>C: Execute pyautogui human-jitter click on match
         end
     end
@@ -62,8 +64,9 @@ sequenceDiagram
 ```mermaid
 graph LR
     PW[User Master Password / Key] --> KDF[Argon2id KDF: derive_key_argon2id]
-    RAM[System Physical RAM Detection] -->|Scales Memory Cost: 19MB - 64MB| KDF
+    RAM[System Physical RAM Detection] -->|Scales Memory Cost: 64MB - 512MB| KDF
     KDF -->|Derives 256-bit Key| AES[AES-GCM Encryption Engine]
+    HW[Local Hardware Fingerprint: CPU, user, volume serial] -->|verify_identity_integrity| AES
     TPM[TPM 2.0 Silicon sealing] -->|Seals derived keys| AES
     DPAPI[Windows DPAPI Backup] -->|Fallback if TPM absent| AES
     AES -->|Encrypts| DB[(sessions_registry.db: clock_json, data_dir, value)]

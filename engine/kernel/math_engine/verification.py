@@ -26,6 +26,17 @@ class Z3ActionVerifier:
         """
         solver = z3.Solver()
         
+        # Define limits
+        max_text_len = 256
+        max_total_text_len = 1024
+        
+        # Navigation indices tracking
+        email_idx = -1
+        next_btn_idx = -1
+        password_idx = -1
+        submit_idx = -1
+        total_text_len_val = 0
+
         # Action types: 0=click, 1=type, 2=scroll, 3=wait, 4=submit
         # We define SMT variables for each action step
         for i, act in enumerate(actions):
@@ -87,8 +98,15 @@ class Z3ActionVerifier:
             
             if i > 0:
                 prev_t = z3.Int(f"act_{i-1}_time")
-                # Time must be strictly increasing, with minimum delay (e.g. 100ms)
-                solver.add(t - prev_t >= 100)
+                prev_act = actions[i-1]
+                prev_type_str = prev_act.get("type", "wait").lower()
+                prev_type_code = {"click":0, "type":1, "scroll":2, "wait":3, "submit":4}.get(prev_type_str, 3)
+                
+                # Consecutiveness click separation: 300ms if same target, else 100ms
+                if type_code == 0 and prev_type_code == 0 and act.get("x") == prev_act.get("x") and act.get("y") == prev_act.get("y"):
+                    solver.add(t - prev_t >= 300)
+                else:
+                    solver.add(t - prev_t >= 100)
 
             # Specific logical rules:
             # Rule: Click targets must have a positive area
@@ -99,9 +117,58 @@ class Z3ActionVerifier:
             if type_code == 1:
                 solver.add(w > 0)
                 solver.add(h > 0)
-                # Ensure input text is not null
-                text_len = len(act.get("text", ""))
+                text_val = act.get("text", "")
+                text_len = len(text_val)
                 solver.add(text_len > 0)
+                solver.add(text_len <= max_text_len)
+                total_text_len_val += text_len
+
+            # Tag interaction rules
+            tag = act.get("tag", "").upper() if act.get("tag") else ""
+            if tag:
+                if type_code == 1:
+                    # Cannot type into elements other than inputs/textareas
+                    solver.add(z3.BoolVal(tag in ["INPUT", "TEXTAREA", "SELECT", "IFRAME"]))
+                if type_code in [0, 1, 2]:
+                    # Cannot interact with hidden elements
+                    solver.add(z3.BoolVal(tag != "HIDDEN"))
+
+            # Classify navigation state machine indices
+            field_name = act.get("field", "").lower() if act.get("field") else ""
+            text_lower = act.get("text", "").lower() if act.get("text") else ""
+            
+            if type_code == 1: # type
+                if "email" in field_name or "user" in field_name or "email" in text_lower or "user" in text_lower:
+                    email_idx = i
+                elif "password" in field_name or "pass" in field_name:
+                    password_idx = i
+            elif type_code == 0: # click
+                if "next" in field_name or "next" in text_lower or "next" in tag.lower():
+                    next_btn_idx = i
+                elif "submit" in field_name or "login" in field_name or "submit" in text_lower or "login" in text_lower:
+                    submit_idx = i
+            elif type_code == 4: # submit
+                submit_idx = i
+
+        # Enforce global text limits
+        solver.add(total_text_len_val <= max_total_text_len)
+
+        # Enforce navigation order invariants via Z3 variables
+        email_idx_var = z3.Int("email_idx_var")
+        next_btn_idx_var = z3.Int("next_btn_idx_var")
+        password_idx_var = z3.Int("password_idx_var")
+        submit_idx_var = z3.Int("submit_idx_var")
+
+        solver.add(email_idx_var == email_idx)
+        solver.add(next_btn_idx_var == next_btn_idx)
+        solver.add(password_idx_var == password_idx)
+        solver.add(submit_idx_var == submit_idx)
+
+        # Logical dependency transitions
+        solver.add(z3.Implies(password_idx_var >= 0, z3.And(email_idx_var >= 0, email_idx_var < password_idx_var)))
+        solver.add(z3.Implies(z3.And(email_idx_var >= 0, next_btn_idx_var >= 0), email_idx_var < next_btn_idx_var))
+        solver.add(z3.Implies(z3.And(next_btn_idx_var >= 0, password_idx_var >= 0), next_btn_idx_var < password_idx_var))
+        solver.add(z3.Implies(z3.And(password_idx_var >= 0, submit_idx_var >= 0), password_idx_var < submit_idx_var))
 
         # Check satisfiability of the system
         if solver.check() == z3.sat:
@@ -113,6 +180,12 @@ class Z3ActionVerifier:
                 # We can re-check with assumptions to identify which steps failed
                 solver.reset()
                 assumptions = []
+                total_text_len_val = 0
+                email_idx = -1
+                next_btn_idx = -1
+                password_idx = -1
+                submit_idx = -1
+
                 for i, act in enumerate(actions):
                     p = z3.Bool(f"step_{i}_ok")
                     assumptions.append(p)
@@ -141,8 +214,65 @@ class Z3ActionVerifier:
                     solver.add(z3.Implies(p, t == int(act.get("timestamp", 0))))
                     if i > 0:
                         prev_t = z3.Int(f"act_{i-1}_time")
-                        solver.add(z3.Implies(p, t - prev_t >= 100))
+                        prev_act = actions[i-1]
+                        prev_type_str = prev_act.get("type", "wait").lower()
+                        prev_type_code = {"click":0, "type":1, "scroll":2, "wait":3, "submit":4}.get(prev_type_str, 3)
                         
+                        if type_code == 0 and prev_type_code == 0 and act.get("x") == prev_act.get("x") and act.get("y") == prev_act.get("y"):
+                            solver.add(z3.Implies(p, t - prev_t >= 300))
+                        else:
+                            solver.add(z3.Implies(p, t - prev_t >= 100))
+
+                    if type_code == 0:
+                        solver.add(z3.Implies(p, z3.Or(w > 0, h > 0)))
+                    elif type_code == 1:
+                        solver.add(z3.Implies(p, w > 0))
+                        solver.add(z3.Implies(p, h > 0))
+                        text_val = act.get("text", "")
+                        text_len = len(text_val)
+                        solver.add(z3.Implies(p, text_len > 0))
+                        solver.add(z3.Implies(p, text_len <= max_text_len))
+                        total_text_len_val += text_len
+
+                    tag = act.get("tag", "").upper() if act.get("tag") else ""
+                    if tag:
+                        if type_code == 1:
+                            solver.add(z3.Implies(p, z3.BoolVal(tag in ["INPUT", "TEXTAREA", "SELECT", "IFRAME"])))
+                        if type_code in [0, 1, 2]:
+                            solver.add(z3.Implies(p, z3.BoolVal(tag != "HIDDEN")))
+
+                    field_name = act.get("field", "").lower() if act.get("field") else ""
+                    text_lower = act.get("text", "").lower() if act.get("text") else ""
+                    if type_code == 1:
+                        if "email" in field_name or "user" in field_name or "email" in text_lower or "user" in text_lower:
+                            email_idx = i
+                        elif "password" in field_name or "pass" in field_name:
+                            password_idx = i
+                    elif type_code == 0:
+                        if "next" in field_name or "next" in text_lower or "next" in tag.lower():
+                            next_btn_idx = i
+                        elif "submit" in field_name or "login" in field_name or "submit" in text_lower or "login" in text_lower:
+                            submit_idx = i
+                    elif type_code == 4:
+                        submit_idx = i
+
+                solver.add(total_text_len_val <= max_total_text_len)
+
+                email_idx_var = z3.Int("email_idx_var")
+                next_btn_idx_var = z3.Int("next_btn_idx_var")
+                password_idx_var = z3.Int("password_idx_var")
+                submit_idx_var = z3.Int("submit_idx_var")
+
+                solver.add(email_idx_var == email_idx)
+                solver.add(next_btn_idx_var == next_btn_idx)
+                solver.add(password_idx_var == password_idx)
+                solver.add(submit_idx_var == submit_idx)
+
+                solver.add(z3.Implies(password_idx_var >= 0, z3.And(email_idx_var >= 0, email_idx_var < password_idx_var)))
+                solver.add(z3.Implies(z3.And(email_idx_var >= 0, next_btn_idx_var >= 0), email_idx_var < next_btn_idx_var))
+                solver.add(z3.Implies(z3.And(next_btn_idx_var >= 0, password_idx_var >= 0), next_btn_idx_var < password_idx_var))
+                solver.add(z3.Implies(z3.And(password_idx_var >= 0, submit_idx_var >= 0), password_idx_var < submit_idx_var))
+
                 if solver.check(assumptions) == z3.unsat:
                     core = solver.unsat_core()
                     unsat_core = [str(c) for c in core]
@@ -154,7 +284,7 @@ class Z3ActionVerifier:
             if unsat_core:
                 explanation += f"Failed elements/assumptions: {', '.join(unsat_core)}."
             else:
-                explanation += "Viewport boundaries or sequential timing constraint violated."
+                explanation += "Viewport boundaries, sequential timing, text limits, tag interaction, or navigation order constraints violated."
                 
             return False, explanation, unsat_core
 

@@ -3,11 +3,13 @@ import random
 import time
 import math
 import logging
+import re
 from typing import List, Tuple, Dict
 import numpy as np
 
 # Import our new fLE/fBm mathematical motor control engine
 from engine.kernel.math_engine.langevin import FLEMotorControl, generate_fbm
+from selenium.webdriver.common.keys import Keys
 
 logger = logging.getLogger(__name__)
 
@@ -38,12 +40,12 @@ class HumanJitter:
         """Applies a new AI-generated persona to the session's behavioral signature."""
         cls.current_persona.update(persona_data)
         logger.info(f"[Jitter] Persona updated: {cls.current_persona['type']}")
- 
+  
     @staticmethod
     def bezier_curve(p0: Tuple[int, int], p1: Tuple[int, int], p2: Tuple[int, int], p3: Tuple[int, int], steps: int = 20) -> List[Tuple[int, int]]:
         """Legacy cubic Bézier curve generator for compatibility."""
         return HumanJitter.bezier_curve_with_easing(p0, p1, p2, p3, steps, easing_fn=lambda u: u)
- 
+  
     @staticmethod
     def bezier_curve_with_easing(p0: Tuple[float, float], p1: Tuple[float, float], p2: Tuple[float, float], p3: Tuple[float, float], steps: int = 20, easing_fn=None) -> List[Tuple[int, int]]:
         """
@@ -63,14 +65,111 @@ class HumanJitter:
         return path
 
     @staticmethod
-    def move_mouse_stealth(target_x: int, target_y: int):
+    def move_mouse_stealth(target_x: int, target_y: int, element=None, element_width: int = None, element_height: int = None, is_click: bool = True):
         """
         Moves the mouse to target coordinates by delegating path generation to the
         Fractional Langevin Equation (fLE) motor control engine.
+        Includes a 5% chance of misclicking outside the target bounds and correcting back.
         """
         import pyautogui
         start_x, start_y = pyautogui.position()
         
+        # Determine Hurst range from persona
+        offset = HumanJitter.current_persona.get("curve_offset", 100)
+        h_min = max(0.35, 0.6 - (offset / 300.0))
+        h_max = min(0.85, 0.9 - (offset / 500.0))
+        
+        # Instantiate fLE Motor Control
+        motor = FLEMotorControl(H_range=(h_min, h_max))
+        
+        # 5% chance of misclick outside active element bounds
+        if is_click and random.random() < 0.05:
+            # Determine active bounds of the element
+            width = 100
+            height = 30
+            if element_width is not None:
+                width = element_width
+            if element_height is not None:
+                height = element_height
+            elif element is not None:
+                try:
+                    width = element.size.get('width', 100)
+                    height = element.size.get('height', 30)
+                except Exception:
+                    pass
+            
+            # Compute a coordinate outside the bounding box
+            offset_x = random.randint(5, 25)
+            offset_y = random.randint(5, 25)
+            dir_x = random.choice([-1, 1])
+            dir_y = random.choice([-1, 1])
+            
+            misclick_x = target_x + dir_x * (width // 2 + offset_x)
+            misclick_y = target_y + dir_y * (height // 2 + offset_y)
+            
+            # Clamp to viewport bounds
+            misclick_x = max(0, min(1920, misclick_x))
+            misclick_y = max(0, min(1080, misclick_y))
+            
+            # 1. Path to misclick target
+            dist = math.hypot(misclick_x - start_x, misclick_y - start_y)
+            if dist >= 5:
+                steps = int(max(15, min(dist / 6.0, 100)))
+                path1 = motor.generate_path(
+                    start=(start_x, start_y),
+                    target=(misclick_x, misclick_y),
+                    steps=steps,
+                    dt=0.005,
+                    mass=1.1,
+                    eta=0.35,
+                    k_p=2.2,
+                    k_d=0.3
+                )
+                for x, y in path1:
+                    pyautogui.moveTo(int(x), int(y))
+                    curr_dist = math.hypot(misclick_x - x, misclick_y - y)
+                    if curr_dist < 50:
+                        time.sleep(random.uniform(0.015, 0.045))
+                    else:
+                        time.sleep(random.uniform(0.005, 0.015))
+            else:
+                pyautogui.moveTo(misclick_x, misclick_y)
+                
+            # 2. Click outside bounds (misclick)
+            pyautogui.click()
+            logger.info(f"[Jitter] Performed misclick at ({misclick_x}, {misclick_y}) instead of ({target_x}, {target_y})")
+            
+            # 3. Pause (reaction delay)
+            time.sleep(random.uniform(0.15, 0.40))
+            
+            # 4. Path back to target (correction trajectory)
+            correct_dist = math.hypot(target_x - misclick_x, target_y - misclick_y)
+            if correct_dist >= 5:
+                correct_steps = int(max(15, min(correct_dist / 6.0, 100)))
+                path2 = motor.generate_path(
+                    start=(misclick_x, misclick_y),
+                    target=(target_x, target_y),
+                    steps=correct_steps,
+                    dt=0.005,
+                    mass=1.1,
+                    eta=0.35,
+                    k_p=2.2,
+                    k_d=0.3
+                )
+                for x, y in path2:
+                    pyautogui.moveTo(int(x), int(y))
+                    curr_dist = math.hypot(target_x - x, target_y - y)
+                    if curr_dist < 50:
+                        time.sleep(random.uniform(0.015, 0.045))
+                    else:
+                        time.sleep(random.uniform(0.005, 0.015))
+            else:
+                pyautogui.moveTo(target_x, target_y)
+                
+            logger.info(f"[Jitter] Corrected cursor trajectory back to target ({target_x}, {target_y})")
+            return
+
+        # Normal movement without misclick
         dx = target_x - start_x
         dy = target_y - start_y
         dist = math.sqrt(dx**2 + dy**2)
@@ -79,15 +178,6 @@ class HumanJitter:
             pyautogui.moveTo(target_x, target_y)
             return
 
-        # Map current persona's curve_offset to Hurst range
-        # Larger offset -> more chaos (lower Hurst range)
-        offset = HumanJitter.current_persona.get("curve_offset", 100)
-        h_min = max(0.35, 0.6 - (offset / 300.0))
-        h_max = min(0.85, 0.9 - (offset / 500.0))
-        
-        # Instantiate fLE Motor Control
-        motor = FLEMotorControl(H_range=(h_min, h_max))
-        
         # Determine step count based on distance and velocity profile
         steps = int(max(15, min(dist / 6.0, 100)))
         
@@ -104,10 +194,8 @@ class HumanJitter:
         )
         
         # Move the mouse along the generated path
-        # Introduce micro delays dynamically to simulate muscle speed variations
         for x, y in path:
             pyautogui.moveTo(int(x), int(y))
-            # Speed fluctuations based on distance from target
             curr_dist = math.hypot(target_x - x, target_y - y)
             if curr_dist < 50:
                 # Decelerate near target (Fitts's Law)
@@ -118,10 +206,70 @@ class HumanJitter:
         logger.info(f"[Jitter] Moved mouse (fLE / H={h_max:.2f} style) to ({target_x}, {target_y}).")
 
     @staticmethod
+    def _generate_typing_operations(text: str) -> List[Dict[str, Any]]:
+        """
+        Parses text into a list of keystroke operations, introducing
+        probabilistic typos (4% chance per word) corrected by backspaces.
+        """
+        parts = re.split(r'(\w+)', text)
+        operations = []
+        for part in parts:
+            if not part:
+                continue
+            if part.isalnum() and len(part) >= 2:
+                # 4% chance of typo per word
+                if random.random() < 0.04:
+                    typo_idx = random.randint(0, len(part) - 1)
+                    correct_char = part[typo_idx]
+                    
+                    # Keyboard adjacency map
+                    qwerty_adj = {
+                        'a': 'qwsz', 'b': 'vghn', 'c': 'xdfv', 'd': 'ersfxc', 'e': 'wsdr',
+                        'f': 'rtgvcd', 'g': 'tyhbvf', 'h': 'yujnbg', 'i': 'ujko', 'j': 'uikmnh',
+                        'k': 'ijlm', 'l': 'okp', 'm': 'njk', 'n': 'bhjm', 'o': 'iklp',
+                        'p': 'ol', 'q': 'wa', 'r': 'edft', 's': 'wedxza', 't': 'rfgy',
+                        'u': 'yhji', 'v': 'cfgb', 'w': 'qase', 'x': 'zsdc', 'y': 'tghu',
+                        'z': 'asx',
+                        'A': 'QWSZ', 'B': 'VGHN', 'C': 'XDFV', 'D': 'ERSFXC', 'E': 'WSDR',
+                        'F': 'RTGVCD', 'G': 'TYHBVF', 'H': 'YUJNBG', 'I': 'UJKO', 'J': 'UIKMNH',
+                        'K': 'IJLM', 'L': 'OKP', 'M': 'NJK', 'N': 'BHJM', 'O': 'IKLP',
+                        'P': 'OL', 'Q': 'WA', 'R': 'EDFT', 'S': 'WEDXZA', 'T': 'RFGY',
+                        'U': 'YHJI', 'V': 'CFGB', 'W': 'QASE', 'X': 'ZSDC', 'Y': 'TGHU',
+                        'Z': 'ASX',
+                        '1': '2q', '2': '13qw', '3': '24we', '4': '35er', '5': '46rt',
+                        '6': '57ty', '7': '68yu', '8': '79io', '9': '80op', '0': '9-p'
+                    }
+                    candidates = qwerty_adj.get(correct_char, "qwertyuiopasdfghjklzxcvbnm")
+                    typo_char = random.choice(candidates)
+                    
+                    if correct_char.isupper() and typo_char.islower():
+                        typo_char = typo_char.upper()
+                    elif correct_char.islower() and typo_char.isupper():
+                        typo_char = typo_char.lower()
+                    
+                    for c in part[:typo_idx]:
+                        operations.append({"op": "type", "char": c})
+                    operations.append({"op": "type", "char": typo_char})
+                    operations.append({"op": "wait", "duration": random.uniform(0.15, 0.30)})
+                    operations.append({"op": "backspace"})
+                    operations.append({"op": "wait", "duration": random.uniform(0.05, 0.15)})
+                    operations.append({"op": "type", "char": correct_char})
+                    for c in part[typo_idx+1:]:
+                        operations.append({"op": "type", "char": c})
+                else:
+                    for c in part:
+                        operations.append({"op": "type", "char": c})
+            else:
+                for c in part:
+                    operations.append({"op": "type", "char": c})
+        return operations
+
+    @staticmethod
     def human_typing(text: str, element=None):
         """
         Types text with realistic inter-character delays simulated using
-        Fractional Brownian Motion (fBm) noise to mimic human typing cadence.
+        Fractional Brownian Motion (fBm) noise to mimic human typing cadence,
+        incorporating probabilistic typos corrected by backspaces.
         """
         base_wpm = HumanJitter.current_persona.get("wpm", 50)
         wpm = random.randint(base_wpm - 8, base_wpm + 8)
@@ -141,10 +289,13 @@ class HumanJitter:
             except Exception:
                 pass
 
+        # Generate the sequence of keystroke operations (with typos)
+        operations = HumanJitter._generate_typing_operations(text)
+
         # Generate Fractional Brownian Motion (fBm) noise for typing delay fluctuations
-        # Hurst parameter H=0.60 models typical human motor control noise
-        if len(text) > 1:
-            fbm = generate_fbm(len(text), H=0.60, sigma=0.8)
+        total_ops = len(operations)
+        if total_ops > 1:
+            fbm = generate_fbm(total_ops, H=0.60, sigma=0.8)
             fgn = np.diff(fbm)
             fgn = np.append(fgn, fgn[-1])
         else:
@@ -152,19 +303,24 @@ class HumanJitter:
 
         # Headless mode fallback typing
         if is_headless and element:
-            for i, char in enumerate(text):
-                # Scale delay using fGn noise
+            for i, op in enumerate(operations):
+                op_type = op["op"]
                 delay = base_delay * (1.0 + 0.4 * fgn[i])
-                delay = max(delay, 0.01) # Avoid negative delay
+                delay = max(delay, 0.01)
                 
-                if char.isupper() or char in "!@#$%^&*()_+{}|:\"<>?":
-                    delay += random.uniform(0.08, 0.15)
-                    
-                if random.random() < hesitation:
-                    time.sleep(random.uniform(0.15, 0.4))
-                    
-                element.send_keys(char)
-                time.sleep(delay)
+                if op_type == "type":
+                    char = op["char"]
+                    if char.isupper() or char in "!@#$%^&*()_+{}|:\"<>?":
+                        delay += random.uniform(0.08, 0.15)
+                    if random.random() < hesitation:
+                        time.sleep(random.uniform(0.15, 0.4))
+                    element.send_keys(char)
+                    time.sleep(delay)
+                elif op_type == "backspace":
+                    element.send_keys(Keys.BACKSPACE)
+                    time.sleep(delay)
+                elif op_type == "wait":
+                    time.sleep(op["duration"])
             logger.info(f"[Jitter] Completed headless typing session (WPM: {wpm})")
             return
 
@@ -173,7 +329,13 @@ class HumanJitter:
         events = []
         current_time = 0.0
         
-        for i, char in enumerate(text):
+        for i, op in enumerate(operations):
+            op_type = op["op"]
+            if op_type == "wait":
+                current_time += op["duration"]
+                continue
+                
+            char = 'backspace' if op_type == "backspace" else op["char"]
             mapped_char = char
             if char == '\n':
                 mapped_char = 'enter'
@@ -195,7 +357,10 @@ class HumanJitter:
             release_time = press_time + hold_duration
             
             # Map key overlaps using virtual events
-            if mapped_char.islower() or mapped_char.isdigit() or mapped_char in " \t\n-= []\\;',./" or mapped_char in ['enter', 'tab']:
+            if mapped_char == 'backspace':
+                events.append((press_time, 'down', 'backspace'))
+                events.append((release_time, 'up', 'backspace'))
+            elif mapped_char.islower() or mapped_char.isdigit() or mapped_char in " \t\n-= []\\;',./" or mapped_char in ['enter', 'tab']:
                 events.append((press_time, 'down', mapped_char))
                 events.append((release_time, 'up', mapped_char))
             elif mapped_char.isupper():
@@ -214,7 +379,7 @@ class HumanJitter:
                 events.append((press_time, 'press', mapped_char))
                 
             # Random overlap schedule for natural typing cadence
-            if i < len(text) - 1:
+            if i < total_ops - 1:
                 if random.random() < 0.38: # 38% chance of key overlap
                     overlap_duration = random.uniform(0.01, 0.04)
                     current_time = release_time - overlap_duration
@@ -244,7 +409,7 @@ class HumanJitter:
                 except Exception:
                     pass
                     
-        logger.info(f"[Jitter] Completed physical/headed typing session (WPM: {wpm})")
+        logger.info(f"[Jitter] Completed physical/headed typing session (WPM: {wpm})")")
 
     @staticmethod
     def random_scroll(browser):

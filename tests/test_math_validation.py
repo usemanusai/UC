@@ -180,6 +180,72 @@ class TestVerificationEngine(unittest.TestCase):
         self.assertEqual(len(actions), 1)
         self.assertEqual(actions[0]["x"], 100)
 
+    def test_z3_unsat_token_limit(self):
+        verifier = Z3ActionVerifier()
+        # Single input exceeds 256 chars limit
+        actions_single_exceeded = [
+            {"type": "type", "x": 100, "y": 150, "width": 50, "height": 30, "text": "a" * 257, "timestamp": 1000}
+        ]
+        is_valid, msg, _ = verifier.verify_sequence(actions_single_exceeded)
+        self.assertFalse(is_valid, "Expected UNSAT for single input exceeding 256 characters")
+
+        # Total input exceeds 1024 chars limit
+        actions_total_exceeded = [
+            {"type": "type", "x": 100, "y": 150, "width": 50, "height": 30, "text": "a" * 200, "timestamp": 1000},
+            {"type": "type", "x": 100, "y": 150, "width": 50, "height": 30, "text": "a" * 200, "timestamp": 1200},
+            {"type": "type", "x": 100, "y": 150, "width": 50, "height": 30, "text": "a" * 200, "timestamp": 1400},
+            {"type": "type", "x": 100, "y": 150, "width": 50, "height": 30, "text": "a" * 200, "timestamp": 1600},
+            {"type": "type", "x": 100, "y": 150, "width": 50, "height": 30, "text": "a" * 200, "timestamp": 1800},
+            {"type": "type", "x": 100, "y": 150, "width": 50, "height": 30, "text": "a" * 200, "timestamp": 2000}
+        ]
+        is_valid, msg, _ = verifier.verify_sequence(actions_total_exceeded)
+        self.assertFalse(is_valid, "Expected UNSAT for total input exceeding 1024 characters")
+
+    def test_z3_unsat_navigation_order(self):
+        verifier = Z3ActionVerifier()
+        # Password before email/username
+        actions_wrong_order = [
+            {"type": "type", "x": 100, "y": 150, "width": 50, "height": 30, "field": "password", "text": "pw123", "timestamp": 1000},
+            {"type": "type", "x": 100, "y": 150, "width": 50, "height": 30, "field": "email", "text": "user@example.com", "timestamp": 1200}
+        ]
+        is_valid, msg, _ = verifier.verify_sequence(actions_wrong_order)
+        self.assertFalse(is_valid, "Expected UNSAT when password input occurs before email")
+
+        # Multi-step flow next button order violation (email -> password -> next)
+        actions_next_order = [
+            {"type": "type", "x": 100, "y": 150, "width": 50, "height": 30, "field": "email", "text": "user@example.com", "timestamp": 1000},
+            {"type": "type", "x": 100, "y": 150, "width": 50, "height": 30, "field": "password", "text": "pw123", "timestamp": 1200},
+            {"type": "click", "x": 100, "y": 250, "width": 50, "height": 30, "field": "next", "timestamp": 1400}
+        ]
+        is_valid, msg, _ = verifier.verify_sequence(actions_next_order)
+        self.assertFalse(is_valid, "Expected UNSAT when next button clicked after password")
+
+    def test_z3_unsat_tag_mismatch(self):
+        verifier = Z3ActionVerifier()
+        # Cannot type into button tag
+        actions_type_button = [
+            {"type": "type", "x": 100, "y": 150, "width": 50, "height": 30, "tag": "BUTTON", "text": "test", "timestamp": 1000}
+        ]
+        is_valid, msg, _ = verifier.verify_sequence(actions_type_button)
+        self.assertFalse(is_valid, "Expected UNSAT when typing is targeted at a BUTTON tag")
+
+        # Cannot click hidden element
+        actions_click_hidden = [
+            {"type": "click", "x": 100, "y": 150, "width": 50, "height": 30, "tag": "HIDDEN", "timestamp": 1000}
+        ]
+        is_valid, msg, _ = verifier.verify_sequence(actions_click_hidden)
+        self.assertFalse(is_valid, "Expected UNSAT when clicking a hidden element")
+
+    def test_z3_unsat_consecutive_clicks_cooldown(self):
+        verifier = Z3ActionVerifier()
+        # Click twice on same coordinates within 200ms (threshold is 300ms)
+        actions_too_fast = [
+            {"type": "click", "x": 100, "y": 150, "width": 50, "height": 30, "timestamp": 1000},
+            {"type": "click", "x": 100, "y": 150, "width": 50, "height": 30, "timestamp": 1200}
+        ]
+        is_valid, msg, _ = verifier.verify_sequence(actions_too_fast)
+        self.assertFalse(is_valid, "Expected UNSAT when consecutive clicks on same coordinates have < 300ms delay")
+
 class TestStateEngine(unittest.TestCase):
     def test_vector_clocks(self):
         v1 = VectorClock("nodeA")

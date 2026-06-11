@@ -76,6 +76,7 @@ class SessionIsolationManager:
         node_id = f"node_{socket.gethostname()}_{os.getpid()}"
         
         def register_tx(conn: sqlite3.Connection) -> int:
+            from engine.kernel.math_engine.crypto import encrypt_string, decrypt_string
             # 1. Query occupied ports from registry
             cursor = conn.cursor()
             cursor.execute("SELECT port FROM state_registry")
@@ -88,7 +89,11 @@ class SessionIsolationManager:
             cursor.execute("SELECT clock_json FROM state_registry WHERE key = ?", (session_id,))
             row = cursor.fetchone()
             if row:
-                clock_data = json.loads(row[0])
+                try:
+                    decrypted_clock = decrypt_string(row[0])
+                    clock_data = json.loads(decrypted_clock)
+                except Exception:
+                    clock_data = {}
                 vclock = VectorClock(node_id, clock_data)
             else:
                 vclock = VectorClock(node_id)
@@ -97,10 +102,12 @@ class SessionIsolationManager:
             vclock.increment()
             
             # 4. Insert or replace session allocation
+            encrypted_data_dir = encrypt_string(data_dir)
+            encrypted_clock = encrypt_string(json.dumps(vclock.serialize()))
             conn.execute("""
                 INSERT OR REPLACE INTO state_registry (key, port, data_dir, clock_json, last_node, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?)
-            """, (session_id, allocated_port, data_dir, json.dumps(vclock.serialize()), node_id, time.time()))
+            """, (session_id, allocated_port, encrypted_data_dir, encrypted_clock, node_id, time.time()))
             
             return allocated_port
 

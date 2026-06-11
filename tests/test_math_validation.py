@@ -330,5 +330,105 @@ def multiply(x, y):
             self.assertTrue(report["graph_energy"] >= 0.0)
             self.assertTrue(report["laplacian_energy"] >= 0.0)
 
+class TestNew2026Hardening(unittest.TestCase):
+    def test_tsallis_and_renyi_entropy(self):
+        from engine.kernel.math_engine.entropy import (
+            calculate_tsallis_entropy,
+            calculate_renyi_entropy,
+            calculate_kl_divergence,
+            calculate_js_divergence
+        )
+        probs = [0.25, 0.25, 0.25, 0.25]
+        s_tsallis = calculate_tsallis_entropy(probs, q=2.0)
+        self.assertAlmostEqual(s_tsallis, 0.75)  # (1 - 4 * 0.0625) / 1 = 0.75
+        
+        s_renyi = calculate_renyi_entropy(probs, alpha=2.0)
+        self.assertAlmostEqual(s_renyi, 2.0)    # -log2(4 * 0.0625) = -log2(0.25) = 2.0
+        
+        p = [0.8, 0.2]
+        q = [0.2, 0.8]
+        kl = calculate_kl_divergence(p, q)
+        self.assertTrue(kl > 0.0)
+        
+        js = calculate_js_divergence(p, q)
+        self.assertTrue(js > 0.0)
+        self.assertTrue(js < 1.0)
+
+    def test_zss_tree_edit_distance(self):
+        from engine.kernel.math_engine.tda import DOMNode, zss_tree_edit_distance, verify_l2c2_continuity
+        
+        # Test tree edit distance on identical trees
+        t1 = DOMNode("DIV", "", [DOMNode("SPAN", "text1")])
+        t2 = DOMNode("DIV", "", [DOMNode("SPAN", "text1")])
+        self.assertAlmostEqual(zss_tree_edit_distance(t1, t2), 0.0)
+        
+        # Test rename cost
+        t3 = DOMNode("DIV", "", [DOMNode("SPAN", "text2")])
+        self.assertAlmostEqual(zss_tree_edit_distance(t1, t3), 0.5)
+        
+        # Test insert/delete
+        t4 = DOMNode("DIV", "", [DOMNode("SPAN", "text1"), DOMNode("INPUT", "")])
+        self.assertAlmostEqual(zss_tree_edit_distance(t1, t4), 1.0)
+        
+        # Test L2C2 continuity
+        self.assertTrue(verify_l2c2_continuity((5.0, 5.0), dom_diff=1.0, lipschitz_const=10.0))
+        self.assertFalse(verify_l2c2_continuity((50.0, 50.0), dom_diff=1.0, lipschitz_const=10.0))
+
+    def test_edf_scheduler_prioritization(self):
+        from engine.kernel.math_engine.scheduler import EDFScheduler
+        import queue
+        
+        scheduler = EDFScheduler()
+        results = queue.Queue()
+        
+        def run_task(name):
+            results.put(name)
+            
+        scheduler.start()
+        
+        # Schedule tasks: task_late has deadline in 0.5s, task_early has deadline in 0.1s
+        scheduler.schedule(0.5, "late_task", run_task, "late")
+        scheduler.schedule(0.1, "early_task", run_task, "early")
+        
+        # Wait for tasks to complete
+        time.sleep(0.8)
+        scheduler.stop()
+        
+        # They must execute in order of deadline: early first, then late
+        first = results.get(timeout=0.1)
+        second = results.get(timeout=0.1)
+        self.assertEqual(first, "early")
+        self.assertEqual(second, "late")
+
+    def test_argon2id_kdf_derivation(self):
+        from engine.kernel.math_engine.crypto import (
+            derive_key_argon2id,
+            seal_key,
+            unseal_key,
+            encrypt_data,
+            decrypt_data
+        )
+        
+        password = b"securepwd123"
+        salt = b"unique_salt_1234"
+        
+        key = derive_key_argon2id(password, salt)
+        self.assertEqual(len(key), 32)
+        
+        # Test symmetric encrypt/decrypt
+        secret_message = b"hello zero trust world"
+        ciphertext = encrypt_data(secret_message, key)
+        self.assertTrue(len(ciphertext) > 12)
+        
+        decrypted = decrypt_data(ciphertext, key)
+        self.assertEqual(decrypted, secret_message)
+        
+        # Test DPAPI sealing/unsealing
+        sealed = seal_key(key)
+        self.assertTrue(len(sealed) > 0)
+        
+        unsealed = unseal_key(sealed)
+        self.assertEqual(unsealed, key)
+
 if __name__ == '__main__':
     unittest.main()

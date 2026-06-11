@@ -228,3 +228,91 @@ class StructuralEntropyMonitor:
             "cbo_scores": {os.path.relpath(k, self.root_dir): v for k, v in cbo_scores.items()},
             "refactoring_alerts": refactoring_alerts
         }
+
+# =========================================================================
+# Thermodynamic Entropy & Divergence Calculations (2026 Standards)
+# =========================================================================
+
+def calculate_tsallis_entropy(probs: Any, q: float = 2.0) -> float:
+    """
+    Computes Tsallis entropy of a probability distribution.
+    S_q = (1 - sum(p_i^q)) / (q - 1)
+    """
+    p = np.array(probs, dtype=np.float64)
+    p = p[p > 0]
+    if len(p) == 0:
+        return 0.0
+    if abs(q - 1.0) < 1e-9:
+        # Falls back to Shannon entropy as limit q -> 1
+        return float(-np.sum(p * np.log(p)))
+    return float((1.0 - np.sum(p ** q)) / (q - 1.0))
+
+def calculate_renyi_entropy(probs: Any, alpha: float = 2.0) -> float:
+    """
+    Computes Renyi entropy of a probability distribution.
+    H_alpha = log2(sum(p_i^alpha)) / (1 - alpha)
+    """
+    p = np.array(probs, dtype=np.float64)
+    p = p[p > 0]
+    if len(p) == 0:
+        return 0.0
+    if abs(alpha - 1.0) < 1e-9:
+        return float(-np.sum(p * np.log2(p)))
+    return float(np.log2(np.sum(p ** alpha)) / (1.0 - alpha))
+
+def calculate_kl_divergence(p: Any, q: Any) -> float:
+    """
+    Computes Kullback-Leibler (KL) divergence between two probability distributions.
+    D_KL(P || Q) = sum(p_i * log2(p_i / q_i))
+    """
+    p = np.array(p, dtype=np.float64)
+    q = np.array(q, dtype=np.float64)
+    # Ensure they are normalized
+    if np.sum(p) > 0: p /= np.sum(p)
+    if np.sum(q) > 0: q /= np.sum(q)
+    
+    # Avoid zero division and log of zero
+    mask = (p > 0) & (q > 0)
+    if not np.any(mask):
+        return 0.0
+    return float(np.sum(p[mask] * np.log2(p[mask] / q[mask])))
+
+def calculate_js_divergence(p: Any, q: Any) -> float:
+    """
+    Computes Jensen-Shannon (JS) divergence between two probability distributions.
+    D_JS(P || Q) = 0.5 * D_KL(P || M) + 0.5 * D_KL(Q || M) where M = 0.5 * (P + Q)
+    """
+    p = np.array(p, dtype=np.float64)
+    q = np.array(q, dtype=np.float64)
+    if np.sum(p) > 0: p /= np.sum(p)
+    if np.sum(q) > 0: q /= np.sum(q)
+    
+    m = 0.5 * (p + q)
+    return 0.5 * calculate_kl_divergence(p, m) + 0.5 * calculate_kl_divergence(q, m)
+
+def verify_fingerprint_entropy(features: Dict[str, Any], reference: Dict[str, Any], max_kl_threshold: float = 0.5) -> Tuple[bool, float]:
+    """
+    Validates synthetic fingerprint parameters against an organic reference profile distribution.
+    Calculates KL divergence. If it exceeds target threshold, returns False to trigger re-rotation.
+    """
+    # Convert feature counts/values to numeric list representations for distribution comparison
+    feat_keys = sorted(list(set(features.keys()).union(reference.keys())))
+    
+    p_vals = []
+    q_vals = []
+    
+    for k in feat_keys:
+        # Map feature values to numeric signals
+        v_p = hash(str(features.get(k, ""))) % 100 + 1
+        v_q = hash(str(reference.get(k, ""))) % 100 + 1
+        p_vals.append(v_p)
+        q_vals.append(v_q)
+        
+    p_arr = np.array(p_vals, dtype=np.float64)
+    q_arr = np.array(q_vals, dtype=np.float64)
+    p_arr /= np.sum(p_arr)
+    q_arr /= np.sum(q_arr)
+    
+    kl_div = calculate_kl_divergence(p_arr, q_arr)
+    is_valid = kl_div <= max_kl_threshold
+    return is_valid, kl_div

@@ -409,7 +409,7 @@ class HumanJitter:
                 except Exception:
                     pass
                     
-        logger.info(f"[Jitter] Completed physical/headed typing session (WPM: {wpm})")")
+        logger.info(f"[Jitter] Completed physical/headed typing session (WPM: {wpm})")
 
     @staticmethod
     def random_scroll(browser):

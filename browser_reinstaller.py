@@ -78,8 +78,14 @@ class BrowserReinstaller:
         
         # Parse clock
         if row:
-            db_guid, clock_json = row
-            db_clock = json.loads(clock_json)
+            db_guid_raw, clock_json_raw = row
+            from engine.kernel.math_engine.crypto import decrypt_string
+            db_guid = decrypt_string(db_guid_raw) if db_guid_raw else None
+            db_clock_str = decrypt_string(clock_json_raw) if clock_json_raw else "{}"
+            try:
+                db_clock = json.loads(db_clock_str)
+            except Exception:
+                db_clock = {}
         else:
             db_guid = None
             db_clock = {}
@@ -100,24 +106,64 @@ class BrowserReinstaller:
             return True
 
         try:
-            new_guid = str(uuid.uuid4())
+            from engine.kernel.math_engine.entropy import verify_fingerprint_entropy
+            import random
+
+            reference_profile = {
+                "MachineGuid": "8a38b1d9-5a1e-450f-90e8-0b2f5d14df90",
+                "DigitalProductId": "0000000000000000000000000000000000000000",
+                "OSVersion": "10.0.22631",
+                "ProcessorCount": "8"
+            }
+
+            new_guid = None
+            new_digital_id = None
+
+            # Find a generated fingerprint that satisfies the thermodynamic divergence constraint
+            for attempt in range(5):
+                temp_guid = str(uuid.uuid4())
+                temp_digital_id = os.urandom(164)
+
+                synthetic_profile = {
+                    "MachineGuid": temp_guid,
+                    "DigitalProductId": temp_digital_id.hex(),
+                    "OSVersion": f"10.0.{random.randint(22000, 23000)}",
+                    "ProcessorCount": str(random.choice([4, 8, 12, 16]))
+                }
+
+                is_valid, kl_div = verify_fingerprint_entropy(synthetic_profile, reference_profile, max_kl_threshold=0.55)
+                if is_valid:
+                    new_guid = temp_guid
+                    new_digital_id = temp_digital_id
+                    logger.info(f"[Reinstaller] Synthetic HWID fingerprint validated successfully (KL Div: {kl_div:.4f}).")
+                    break
+                else:
+                    logger.warning(f"[Reinstaller] Fingerprint validation failed (KL Div: {kl_div:.4f} > 0.55). Retrying generation (attempt {attempt+1}/5)...")
+
+            if not new_guid:
+                new_guid = str(uuid.uuid4())
+                new_digital_id = os.urandom(164)
+                logger.warning("[Reinstaller] Exceeded max attempts to minimize KL divergence. Falling back to default generated profile.")
+
             key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Microsoft\Cryptography', 0, winreg.KEY_ALL_ACCESS)
             winreg.SetValueEx(key, 'MachineGuid', 0, winreg.REG_SZ, new_guid)
             winreg.CloseKey(key)
 
-            new_digital_id = os.urandom(164)
             key2 = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Microsoft\Windows NT\CurrentVersion', 0, winreg.KEY_ALL_ACCESS)
             winreg.SetValueEx(key2, 'DigitalProductId', 0, winreg.REG_BINARY, new_digital_id)
             winreg.CloseKey(key2)
 
             # 2. Write the new GUID and increment the causal clock in the database
             local_clock.increment()
-            
+
             def update_hwid_tx(conn: sqlite3.Connection):
+                from engine.kernel.math_engine.crypto import encrypt_string
+                enc_guid = encrypt_string(new_guid)
+                enc_clock = encrypt_string(json.dumps(local_clock.serialize()))
                 conn.execute("""
                     INSERT OR REPLACE INTO state_registry (key, value, clock_json, last_node, updated_at)
                     VALUES ('global_hwid', ?, ?, ?, ?)
-                """, (new_guid, json.dumps(local_clock.serialize()), node_id, time.time()))
+                """, (enc_guid, enc_clock, node_id, time.time()))
 
             state_db.run_concurrent_write(update_hwid_tx)
             logger.info(f'[Reinstaller] HWID (MachineGuid + DigitalProductId) Rotated successfully: {new_guid}')

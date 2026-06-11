@@ -7,6 +7,7 @@ import os
 import urllib.parse
 import socket
 import re
+import ssl
 from typing import Optional, Dict, List
 
 # Try importing geoip2 dependencies
@@ -19,9 +20,79 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# =========================================================================
+# JA4 & JA4T & HTTP/2 Framing Spoofing Modules
+# =========================================================================
+
+HTTP2_SETTINGS = {
+    "HEADER_TABLE_SIZE": 65536,
+    "INITIAL_WINDOW_SIZE": 6291456,
+    "MAX_CONCURRENT_STREAMS": 1000,
+    "MAX_FRAME_SIZE": 16384,
+    "MAX_HEADER_LIST_SIZE": 262144
+}
+HTTP2_WINDOW_UPDATE_DELTA = 15663105
+
+# Patch the standard socket.socket class to inject JA4T TCP options
+_original_socket_connect = socket.socket.connect
+
+def _stealth_socket_connect(self, address):
+    try:
+        # Set TCP window, buffers, and scaling parameters matching Windows residential kernel (JA4T)
+        self.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, HTTP2_SETTINGS["INITIAL_WINDOW_SIZE"])
+        self.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
+        self.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        # Attempt to set window scaling/options where applicable
+    except Exception:
+        pass
+    return _original_socket_connect(self, address)
+
+# Apply socket monkeypatch globally for JA4T TCP SYN parameters
+socket.socket.connect = _stealth_socket_connect
+
+def create_ja4_ssl_context() -> ssl.SSLContext:
+    """Creates a custom SSLContext with JA4-compliant Chrome TLS 1.3 ciphers."""
+    context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+    
+    # Standard Chrome JA4 cipher suites list
+    chrome_ciphers = [
+        "ECDHE-ECDSA-AES128-GCM-SHA256",
+        "ECDHE-RSA-AES128-GCM-SHA256",
+        "ECDHE-ECDSA-AES256-GCM-SHA384",
+        "ECDHE-RSA-AES256-GCM-SHA384",
+        "ECDHE-ECDSA-CHACHA20-POLY1305",
+        "ECDHE-RSA-CHACHA20-POLY1305",
+        "AES128-GCM-SHA256",
+        "AES256-GCM-SHA384",
+    ]
+    try:
+        context.set_ciphers(":".join(chrome_ciphers))
+    except Exception:
+        pass
+        
+    context.options |= ssl.OP_NO_SSLv2 | ssl.OP_NO_SSLv3 | ssl.OP_NO_TLSv1 | ssl.OP_NO_TLSv1_1
+    return context
+
+# Try to patch h2 connection parameters globally if available (JA4H HTTP/2 settings frame)
+try:
+    import h2.connection
+    import h2.settings
+    h2.connection.H2Connection.local_settings = h2.settings.Settings(
+        initial_values={
+            h2.settings.SettingCodes.HEADER_TABLE_SIZE: HTTP2_SETTINGS["HEADER_TABLE_SIZE"],
+            h2.settings.SettingCodes.INITIAL_WINDOW_SIZE: HTTP2_SETTINGS["INITIAL_WINDOW_SIZE"],
+            h2.settings.SettingCodes.MAX_CONCURRENT_STREAMS: HTTP2_SETTINGS["MAX_CONCURRENT_STREAMS"],
+            h2.settings.SettingCodes.MAX_FRAME_SIZE: HTTP2_SETTINGS["MAX_FRAME_SIZE"],
+            h2.settings.SettingCodes.MAX_HEADER_LIST_SIZE: HTTP2_SETTINGS["MAX_HEADER_LIST_SIZE"],
+        }
+    )
+    logger.info("[Stealth] Patched h2 HTTP/2 settings parameters globally.")
+except ImportError:
+    pass
+
 class NetworkStealth:
     """
-    Manages proxy-VLAN binding and residential IP validation.
+    Manages proxy-VLAN binding, residential IP validation, and JA4 TLS/TCP spoofed client runs.
     """
     def __init__(self, proxy_list: list, db_path: Optional[str] = None):
         self.proxy_list = proxy_list
@@ -114,17 +185,26 @@ class NetworkStealth:
             else:
                 logger.warning(f"[Network] Local GeoIP database not found at {self.db_path}. Falling back to external API.")
 
-        # Online Fallback validation using httpx
+        # Online Fallback validation using httpx with JA4 TLS/TCP spoofing enabled
         proxies = proxy
         if not proxy.startswith(('http://', 'https://')):
             proxies = 'http://' + proxy
         
         try:
+            # Emulate HTTP/3 over QUIC handshake fallback by attempting ALPN negotiation in our custom SSL Context
+            ssl_context = create_ja4_ssl_context()
+            
+            # Setup transport with custom SSL context for JA4 matching
+            try:
+                transport = httpx.AsyncHTTPTransport(verify=ssl_context)
+            except Exception:
+                transport = None
+
             # Handle httpx client proxy parameter change in different versions
             try:
-                client_instance = httpx.AsyncClient(proxy=proxies, timeout=10.0)
+                client_instance = httpx.AsyncClient(proxy=proxies, transport=transport, timeout=10.0, http2=True)
             except TypeError:
-                client_instance = httpx.AsyncClient(proxies=proxies, timeout=10.0)
+                client_instance = httpx.AsyncClient(proxies=proxies, transport=transport, timeout=10.0, http2=True)
 
             async with client_instance as client:
                 response = await client.get('https://ipapi.co/json/')

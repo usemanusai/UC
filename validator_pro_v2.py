@@ -3418,6 +3418,33 @@ def _find_element_in_frames(browser, by, selector):
     return None
 
 
+from html.parser import HTMLParser
+from engine.kernel.math_engine.tda import DOMNode, zss_tree_edit_distance
+
+class DOMTreeBuilder(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.root = None
+        self.stack = []
+    def handle_starttag(self, tag, attrs):
+        node = DOMNode(tag)
+        if not self.root:
+            self.root = node
+        if self.stack:
+            self.stack[-1].children.append(node)
+        self.stack.append(node)
+    def handle_endtag(self, tag):
+        if self.stack:
+            self.stack.pop()
+    def handle_data(self, data):
+        if self.stack and data.strip():
+            self.stack[-1].text += data.strip()
+            
+def html_to_dom_node(html_str):
+    builder = DOMTreeBuilder()
+    builder.feed(html_str)
+    return builder.root or DOMNode("DIV")
+
 def _safe_find_element(browser, by, selector, timeout=30, description="element"):
     """
     Wraps recursive iframe search with polling to locate an element across all frames (iframe/frame).
@@ -3442,6 +3469,53 @@ def _safe_find_element(browser, by, selector, timeout=30, description="element")
         if time.time() - start_time > timeout:
             break
         time.sleep(0.5)
+        
+    # Try topological fallback before reporting failure
+    try:
+        desc_lower = description.lower()
+        sel_lower = selector.lower() if selector else ""
+        candidate_tags = []
+        if "input" in desc_lower or "email" in desc_lower or "username" in desc_lower or "password" in desc_lower or "user" in desc_lower or "pwd" in desc_lower or "in_sel" in sel_lower:
+            candidate_tags = ["input"]
+            target_template = DOMNode("INPUT")
+        elif "button" in desc_lower or "submit" in desc_lower or "btn" in desc_lower or "sub_sel" in sel_lower or "click" in desc_lower:
+            candidate_tags = ["button", "input", "a"]
+            target_template = DOMNode("BUTTON")
+        else:
+            candidate_tags = ["input", "button", "a", "div", "span"]
+            target_template = DOMNode("DIV")
+            
+        candidates = []
+        for tag in candidate_tags:
+            try:
+                found = browser.find_elements(By.TAG_NAME, tag)
+                candidates.extend(found)
+            except Exception:
+                pass
+                
+        best_candidate = None
+        min_distance = float('inf')
+        
+        for cand in candidates:
+            try:
+                if not cand.is_displayed():
+                    continue
+                outer_html = cand.get_attribute("outerHTML")
+                if not outer_html:
+                    continue
+                cand_node = html_to_dom_node(outer_html)
+                dist = zss_tree_edit_distance(cand_node, target_template)
+                if dist < min_distance:
+                    min_distance = dist
+                    best_candidate = cand
+            except Exception:
+                pass
+                
+        if best_candidate and min_distance < 10.0:
+            print_action(f"{Fore.GREEN}[TDA] Located element '{description}' using Topological DOM Matching (TED: {min_distance}){Style.RESET_ALL}")
+            return best_candidate
+    except Exception as tda_err:
+        print_action(f"{Fore.YELLOW}[TDA] Topological fallback error: {tda_err}{Style.RESET_ALL}")
         
     print_action(f"{Fore.RED}[Element] Timeout: {description} not found within {timeout}s (selector: {selector}) in any frame.{Style.RESET_ALL}")
     try:
@@ -4953,10 +5027,34 @@ def check_account(
                 
                 if var_enable_mouse_clicks.get() and mouse_clicks:
                     import pyautogui
+                    from engine.kernel.math_engine.tda import verify_l2c2_continuity, zss_tree_edit_distance
+                    
+                    last_click_coords = None
+                    last_click_dom = None
+                    
                     for click_action in mouse_clicks:
                         x, y, num_clicks, interval = click_action
                         x, y = int(x), int(y)
                         print_action(f"{Fore.MAGENTA}Performing {num_clicks} mouse clicks at ({x}, {y}) with {interval} seconds interval.{Style.RESET_ALL}")
+                        
+                        # Verify coordinate alignment continuity using L2C2 constraint
+                        try:
+                            body_html = browser.find_element(By.TAG_NAME, "body").get_attribute("outerHTML")
+                            current_dom = html_to_dom_node(body_html)
+                        except Exception:
+                            current_dom = None
+                            
+                        if last_click_coords and last_click_dom and current_dom:
+                            dx = x - last_click_coords[0]
+                            dy = y - last_click_coords[1]
+                            d_dom = zss_tree_edit_distance(current_dom, last_click_dom)
+                            d_dom = max(d_dom, 0.1) # Avoid zero division
+                            if not verify_l2c2_continuity((dx, dy), d_dom, lipschitz_const=50.0):
+                                print_action(f"{Fore.RED}[L2C2] Continuity violation detected! Spatial change ({dx}, {dy}) exceeds bound for DOM diff ({d_dom}). Potential Coordinate Hijacking!{Style.RESET_ALL}")
+                                
+                        last_click_coords = (x, y)
+                        last_click_dom = current_dom
+                        
                         if stealth_settings and stealth_settings.get("jitter") and 'HumanJitter' in globals():
                             for _ in range(int(num_clicks)):
                                 try:
@@ -5589,27 +5687,28 @@ def check_accounts_logic(
             print_action(f"{Fore.RED}[Dynamic Proxy] Failed to start ProxySourceWorker: {e}{Style.RESET_ALL}")
 
     try:
-        for index, account in enumerate(accounts, start=1):
+        from engine.kernel.math_engine.scheduler import EDFScheduler
+        scheduler = EDFScheduler()
+        
+        # Define a function to process a single account
+        def process_single_account(index, account):
+            nonlocal user_agent_index, proxy_index
+            global browser, mouse_clicks, css_clicks
+            _sweeper_stop = None
+            
             if stop_event.is_set():
-                print_action(
-                    f"{Fore.RED}Force Stop activated. Stopping account checks.{Style.RESET_ALL}"
-                )
-                break
-
+                return
+                
             while pause_event.is_set():
                 print_action(
                     f"{Fore.YELLOW}Script is paused. Waiting to resume...{Style.RESET_ALL}"
                 )
                 time.sleep(1)
-
                 if stop_event.is_set():
                     print_action(
                         f"{Fore.RED}Force Stop activated while paused. Stopping account checks.{Style.RESET_ALL}"
                     )
-                    break
-
-            if stop_event.is_set():
-                break
+                    return
 
             email, password = account
             print_action(
@@ -5696,7 +5795,6 @@ def check_accounts_logic(
                                 f"{Fore.YELLOW}[Proxy] Proxy enabled but no valid proxy resolved. Skipping proxy for {email}.{Style.RESET_ALL}"
                             )
 
-
                     # STEALTH INJECTION: Per-Session Linguistic Chameleon Persona Regeneration
                     if stealth_settings and stealth_settings.get("jitter") and stealth_settings.get("openrouter_keys") and 'HumanJitter' in globals():
                         try:
@@ -5720,11 +5818,8 @@ def check_accounts_logic(
                             print_action(f"{Fore.RED}[STEALTH ERROR] Failed HWID/Purge: {he}{Style.RESET_ALL}")
 
                     # STEALTH INJECTION: Session Isolation Engine
-                    # Each account gets its own debugging port appended to its OWN args copy.
                     current_user_data_dir = user_data_dir
 
-                    # Phase 6: Auto-Isolation Override - when Log Ingestion mode is active and
-                    # var_log_ingestion_isolate is True, force session isolation regardless of checkbox state.
                     effective_stealth = dict(stealth_settings) if stealth_settings else {}
                     if var_log_ingestion_enabled.get() and var_log_ingestion_isolate.get():
                         if not effective_stealth.get("isolation"):
@@ -5743,18 +5838,12 @@ def check_accounts_logic(
                                 if sess_data:
                                     print_action(f"{Fore.CYAN}[STEALTH] Isolated Session created for {email} on port {sess_data['port']}{Style.RESET_ALL}")
                                     current_user_data_dir = sess_data['dir']
-                                    # Strip any stale --remote-debugging-port args before adding the new one.
-                                    # Without this guard the list grows by one port per account (Bug: accumulated ports).
                                     account_chromedriver_args = [
                                         a for a in account_chromedriver_args
                                         if not a.startswith('--remote-debugging-port=')
                                         and not a.startswith('--load-extension=')
                                     ]
                                     account_chromedriver_args.append(f"--remote-debugging-port={sess_data['port']}")
-                                    # Extension support for isolated sessions:
-                                    # get_isolated_session() seeded the profile Preferences file so Chrome
-                                    # honours --load-extension=. Now inject the arg explicitly into the
-                                    # chromedriver_args list so the attachment-mode Chrome CLI also gets it.
                                     if load_extensions and sess_data.get('ext_arg'):
                                         account_chromedriver_args.append(sess_data['ext_arg'])
                                         print_action(f"{Fore.GREEN}[STEALTH] Extensions injected into isolated session for {email}.{Style.RESET_ALL}")
@@ -5783,25 +5872,15 @@ def check_accounts_logic(
                         print_action(
                             f"{Fore.RED}Failed to initialize browser for account {email}. Skipping...{Style.RESET_ALL}"
                         )
-                        continue
+                        return
 
-                    # ── CDP Background Tab Sweeper ─────────────────────────────────────
-                    # Started immediately after browser is confirmed healthy.
-                    # Runs every 0.3s via HTTP/CDP directly — zero Selenium thread risk.
                     _sweeper_stop = _start_cdp_tab_sweeper(browser, website_link, interval=0.3)
-                    # ── Developer Mode Auto-Enabler ───────────────────────────────────
-                    # navigate to chrome://extensions, flip the toggle via shadow DOM JS,
-                    # then return to the target page. This ensures --load-extension=
-                    # directives are always honoured regardless of profile history.
                     if load_extensions and var_developer_mode.get():
                         try:
                             _current_url_before = browser.current_url
                             browser.get("chrome://extensions/")
                             import time as _t
-                            # ── TAB PRUNE A: after navigating TO chrome://extensions/ ──────────
-                            # Extensions may open tabs when Chrome navigates away from the target
-                            # domain and their service workers wake up. Prune immediately.
-                            _t.sleep(1.5)  # Give extension tabs time to fully open
+                            _t.sleep(1.5)
                             _prune_extra_tabs(browser, website_link)
                             browser.execute_script("""
                                 (function() {
@@ -5815,21 +5894,13 @@ def check_accounts_logic(
                             """)
                             _t.sleep(0.8)
                             browser.get(_current_url_before if _current_url_before != 'data:,' else website_link)
-                            # ── TAB PRUNE B: after navigating BACK to target URL ─────────────
-                            # The target site may open tabs on load; extensions also react to
-                            # navigation to the target domain. Prune BEFORE handing off.
-                            _t.sleep(1.0)  # Give any spawned tabs time to appear
+                            _t.sleep(1.0)
                             _prune_extra_tabs(browser, website_link)
                             print_action(f"{Fore.GREEN}[Extensions] Developer Mode enabled in browser.{Style.RESET_ALL}")
-                            # Final prune guard (original position kept for belt+suspenders)
                             _prune_extra_tabs(browser, website_link)
                         except Exception as _dme:
                             print_action(f"{Fore.YELLOW}[Extensions] Developer Mode toggle skipped: {_dme}{Style.RESET_ALL}")
 
-                    # STEALTH INJECTION: CDP Cookie Injection Pre-Navigation
-                    # Phase 5: Two-path fallback
-                    #   Path A (Log Ingestion mode): per-account cookie_path from DB
-                    #   Path B (Global mode):        stealth_settings["cookie_list_path"] or config/tracking_cookies.json
                     _cookie_file_to_inject = None
                     if var_log_ingestion_enabled.get():
                         _per_account_cookie = get_cookie_path_for_account(email, password, db_name)
@@ -5837,15 +5908,12 @@ def check_accounts_logic(
                             _cookie_file_to_inject = _per_account_cookie
                             print_action(f"{Fore.CYAN}[Log Ingestion] Per-account cookie file resolved: {_cookie_file_to_inject}{Style.RESET_ALL}")
                         else:
-                            # No DB entry yet - fall back to global path
                             _cookie_file_to_inject = effective_stealth.get("cookie_list_path", "").strip() or None
                             if _cookie_file_to_inject:
                                 print_action(f"{Fore.YELLOW}[Log Ingestion] No per-account cookie in DB for {email}; using global cookie file.{Style.RESET_ALL}")
                     else:
-                        # Standard global cookie path
                         _cookie_file_to_inject = (stealth_settings or {}).get("cookie_list_path", "").strip() or None
                         if not _cookie_file_to_inject:
-                            # Legacy fallback: auto-detect tracking_cookies.json in config dir
                             _fallback = locator.get_absolute_path("config/tracking_cookies.json") if 'locator' in globals() else None
                             if _fallback and os.path.exists(_fallback):
                                 _cookie_file_to_inject = _fallback
@@ -5855,7 +5923,6 @@ def check_accounts_logic(
                         print_action(f"{Fore.CYAN}[Stealth] {_injected_count} cookie(s) injected via CDP for {email}{Style.RESET_ALL}")
                     elif _cookie_file_to_inject:
                         print_action(f"{Fore.YELLOW}[Stealth] Cookie file path set but file not found: {_cookie_file_to_inject}{Style.RESET_ALL}")
-
 
                 # Prepare mouse clicks if enabled
                 mouse_clicks = []
@@ -5871,7 +5938,6 @@ def check_accounts_logic(
                             print_action(
                                 f"{Fore.YELLOW}Incomplete mouse click data; skipping this click action.{Style.RESET_ALL}"
                             )
-                    # Prepare CSS Selector clicks
                     css_clicks = []
                     for frame in css_click_frames:
                         selector = frame["selector_entry"].get().strip()
@@ -5884,19 +5950,14 @@ def check_accounts_logic(
                                 f"{Fore.YELLOW}Incomplete CSS click data; skipping this CSS click action.{Style.RESET_ALL}"
                             )
 
-                # ── Ensure CDP sweeper is active for same-session reuse ────────────────
-                # When same_session=True the browser block above is skipped for accounts
-                # 2+. We need a fresh sweeper per-account so the original_page_id is
-                # refreshed (in case the tab navigated). Always stop old + start new.
                 if browser and var_use_same_session.get():
-                    # Stop previous sweeper gracefully before starting new one
                     try:
                         if _sweeper_stop:
                             _sweeper_stop.set()
                     except Exception:
                         pass
                     import time as _st_time
-                    _st_time.sleep(0.1)  # Allow the old thread to see the stop signal
+                    _st_time.sleep(0.1)
                     _sweeper_stop = _start_cdp_tab_sweeper(browser, website_link, interval=0.3)
 
                 check_account(
@@ -5920,18 +5981,55 @@ def check_accounts_logic(
                 )
 
             finally:
-                # Stop the CDP tab sweeper for this account
                 try:
-                    _sweeper_stop.set()
+                    if _sweeper_stop:
+                        _sweeper_stop.set()
                 except Exception:
                     pass
                 _sweeper_stop = None
-                # Only close browser if session persistence is NOT enabled
                 if not var_use_same_session.get():
                     close_browser_instance()
 
-                # Small delay between accounts to mimic human behavior
                 time.sleep(2)
+
+        # Populate scheduler and track execution events
+        execution_events = []
+        for index, account in enumerate(accounts, start=1):
+            email = account[0]
+            # Premium/VIP accounts run first (relative_deadline = 1.0s, priority = 0)
+            if "vip" in email.lower() or "premium" in email.lower():
+                relative_deadline = 1.0
+                priority = 0
+                print_action(f"{Fore.GREEN}[EDF] Prioritized Premium/VIP Account '{email}' queued with high urgency.{Style.RESET_ALL}")
+            else:
+                relative_deadline = float(5.0 + (index * 5.0))
+                priority = 10
+                
+            task_done_event = threading.Event()
+            execution_events.append(task_done_event)
+            
+            def make_task_fn(idx, acc, ev):
+                return lambda: process_single_account_task(idx, acc, ev)
+                
+            def process_single_account_task(idx, acc, ev):
+                try:
+                    process_single_account(idx, acc)
+                finally:
+                    ev.set()
+                    
+            scheduler.schedule(relative_deadline, f"account_{index}", make_task_fn(index, account, task_done_event), priority=priority)
+            
+        scheduler.start()
+        
+        # Wait for all scheduler tasks to set their completion events
+        for ev in execution_events:
+            while not ev.is_set():
+                if stop_event.is_set():
+                    scheduler.stop()
+                    break
+                ev.wait(timeout=1.0)
+                
+        scheduler.stop()
 
     finally:
         if proxy_worker:
@@ -7366,7 +7464,10 @@ def save_settings():
     try:
         _fd, _tmp_path = _tempfile_mod.mkstemp(dir=_settings_dir, suffix='.json.tmp')
         with os.fdopen(_fd, 'w', encoding='utf-8') as _tmp_f:
-            json.dump(settings, _tmp_f, indent=4)
+            from engine.kernel.math_engine.crypto import encrypt_string
+            json_str = json.dumps(settings, indent=4)
+            encrypted_str = encrypt_string(json_str)
+            _tmp_f.write(encrypted_str)
             _tmp_f.flush()
             os.fsync(_tmp_f.fileno())  # Force OS to flush to disk
         _fd = None  # os.fdopen took ownership, don't close again
@@ -7404,7 +7505,10 @@ def load_settings():
     def _try_load(path):
         """Attempt to load settings from a given path using json."""
         with open(path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+            content = f.read().strip()
+        from engine.kernel.math_engine.crypto import decrypt_string
+        decrypted_content = decrypt_string(content)
+        data = json.loads(decrypted_content)
         if not isinstance(data, dict):
             raise ValueError(f"Expected dict, got {type(data).__name__}")
         return data

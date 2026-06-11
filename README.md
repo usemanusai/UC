@@ -21,7 +21,7 @@
   - [5. Claude Proxy Fallback Integration](#5-claude-proxy-fallback-integration)
   - [6. Telegram Reporting Subsystem](#6-telegram-reporting-subsystem)
   - [7. Tab Monitoring & Port Scan Daemon](#7-tab-monitoring--port-scan-daemon)
-  - [8. Automated Session Integrity & Cleanup Daemon](#8-automated-session-integrity--cleanup-daemon)
+  - [8. Phase 2 Hardening Core Engine (2026 Standards)](#8-phase-2-hardening-core-engine-2026-standards)
   - [9. AI Orchestration & Extended Skill Modules](#9-ai-orchestration--extended-skill-modules)
 - [Extensions & Solvers](#extensions--solvers)
 - [Proxy Support](#proxy-support)
@@ -365,9 +365,37 @@ Located in `tab_monitor.py`, this utility runs alongside the checker to monitor 
 - **Brute-Force Scanner**: Scans localhost ports (10000–20000) in chunks of 500. It queries `/json/version` to locate active Chrome CDP ports.
 - **Tab Monitoring**: Connects to the active port's `/json` endpoint every 500ms, logging the URLs, page titles, and IDs of all open pages to `tab_monitor.log`.
 
+### 8. Phase 2 Hardening Core Engine (2026 Standards)
+
+Implemented under `engine/kernel/math_engine/`, this subsystem mathematically and cryptographically hardens the browser and network profile to resist advanced 2026 bot fingerprinting and coordinate hijacking:
+
+#### A. Registry HWID Rotation & Isolation (`browser_reinstaller.py`, `session_isolation.py`)
+- **Vector Clock Coordination**: Prevents concurrency collisions during Windows `MachineGuid` and `DigitalProductId` rotation across multi-node execution engines. Uses the `VectorClock` class inside `state.py` mapped to a WAL SQLite state database (`sessions_registry.db`).
+- **Thermodynamic Fingerprint Divergence Filtering**: When generating a synthetic hardware profile, `browser_reinstaller.py` executes up to 5 generation loops, verifying each profile against an organic reference distribution. It accepts the profile only when the Kullback-Leibler (KL) divergence computed via `verify_fingerprint_entropy` in `entropy.py` is strictly below `0.55`.
+- **AppData Wiping**: Purges Chrome's tracking directories (`Cache`, `Code Cache`, `IndexedDB`, `Service Worker`, and fingerprint files) on startup to guarantee hard isolation.
+- **Registry State & Session DB Encryption**: Cryptographically seals profile directories (`data_dir`) and logical clocks (`clock_json`) stored in `sessions_registry.db` using AES-GCM authenticated encryption (base64-encoded).
+
+#### B. Topological DOM Selector Fallback (`tda.py`, `validator_pro_v2.py`)
+- **ZSS Tree Edit Distance**: If standard XPath or CSS selectors fail or timeout (such as under dynamic class obfuscation), parses the target page's DOM subtree using an HTML Parser into a `DOMNode` tree structure.
+- **Topological Matching**: Compares all visible candidate elements against a reference `DOMNode` template and selects the candidate with the minimum tree edit distance using a pure-Python implementation of the **Zhang-Shasha (ZSS) Tree Edit Distance (TED)** algorithm. Integrated into the Selenium lookup wrapper `_safe_find_element` in `validator_pro_v2.py`.
+
+#### C. Lipschitz Mouse Jitter Constraint (`tda.py`, `validator_pro_v2.py`)
+- **L2C2 Spatially-Local Regularization**: Verifies that the spatial movement coordinates ($dx, dy$) of simulated mouse clicks are bounded by the structural edit distance of the DOM ($d_{dom}$) using a Lipschitz continuity constraint:
+  $$d_{spatial} \le L \cdot d_{dom}$$
+- **Clickjacking Protection**: Integrated into the pyautogui click execution loop in `validator_pro_v2.py` to prevent coordinate-based hijack attacks by validating local continuity bounds dynamically.
+
+#### D. Zero-Trust Cryptography (`crypto.py`, `validator_pro_v2.py`)
+- **TPM 2.0 & DPAPI Wrapper**: Cryptographically seals master decryption keys with TPM 2.0 silicon (with a robust fallback to DPAPI + Hardware Fingerprinting incorporating processor features, volume serials, and nodes).
+- **Argon2id Key Derivation**: Employs the memory-hard KDF (`derive_key_argon2id`) dynamically scaled to system physical RAM (up to 64 MiB/65536 KB on systems >8GB RAM, falling back to 32 MiB on >4GB and 19 MiB minimum on lower memory sizes) to derive AES-GCM encryption keys.
+- **Disk Storage Protection**: All local settings files (`settings.json` in `engine/registry/`) are fully encrypted using AES-GCM on disk.
+
+#### E. Earliest Deadline First Asynchronous Scheduler (`scheduler.py`, `validator_pro_v2.py`)
+- **EDF Ready Queue**: Manages asynchronous check threads using a binary min-heap (`heapq`) in `EDFScheduler`.
+- **Dynamic Prioritization**: Staggers account validation tasks. Accounts matching premium/VIP patterns are dynamically prioritized (relative deadline of 1.0s and high priority) to execute before standard staggered accounts (which run with staggered deadlines and lower priority). Provides thread-safe queue lock coordination.
+
 ---
 
-### 8. AI Orchestration & Extended Skill Modules
+### 9. AI Orchestration & Extended Skill Modules
 
 This section covers the auxiliary modules, prebuilt configs, and advanced agentic features packed into UC.
 

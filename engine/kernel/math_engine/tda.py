@@ -336,3 +336,128 @@ def find_target_topologically(
         return 0
         
     return best_idx
+
+# =========================================================================
+# ZSS DOM Tree Edit Distance & L2C2 Lipschitz Regularizer (2026 Standards)
+# =========================================================================
+
+class DOMNode:
+    """Represents a simplified node in the Document Object Model (DOM) tree."""
+    def __init__(self, tag: str, text: str = "", children: List['DOMNode'] = None):
+        self.tag = tag.upper()
+        self.text = text.strip()
+        self.children = children or []
+
+def zss_tree_edit_distance(t1: DOMNode, t2: DOMNode) -> float:
+    """
+    Pure-Python implementation of the Zhang-Shasha (ZSS) Tree Edit Distance algorithm.
+    Computes distance between two DOMNode trees.
+    """
+    def postorder(node, nodes, leftmost_leaf):
+        children_indices = []
+        for child in node.children:
+            postorder(child, nodes, leftmost_leaf)
+            children_indices.append(len(nodes) - 1)
+        
+        idx = len(nodes)
+        nodes.append(node)
+        
+        if not children_indices:
+            leftmost_leaf[idx] = idx
+        else:
+            leftmost_leaf[idx] = leftmost_leaf[children_indices[0]]
+
+    nodes1 = []
+    leftmost_leaf1 = {}
+    postorder(t1, nodes1, leftmost_leaf1)
+    
+    nodes2 = []
+    leftmost_leaf2 = {}
+    postorder(t2, nodes2, leftmost_leaf2)
+    
+    len1 = len(nodes1)
+    len2 = len(nodes2)
+    
+    if len1 == 0 and len2 == 0:
+        return 0.0
+    if len1 == 0:
+        return float(len2)
+    if len2 == 0:
+        return float(len1)
+
+    def get_delete_cost(n):
+        return 1.0
+        
+    def get_insert_cost(n):
+        return 1.0
+        
+    def get_rename_cost(n1, n2):
+        if n1.tag == n2.tag:
+            return 0.0 if n1.text == n2.text else 0.5
+        return 1.0
+
+    def get_keyroots(nodes, leftmost_leaf):
+        keyroots = []
+        for i in range(len(nodes)):
+            is_leftmost = False
+            for j in range(i + 1, len(nodes)):
+                if leftmost_leaf[j] == leftmost_leaf[i]:
+                    is_leftmost = True
+                    break
+            if not is_leftmost:
+                keyroots.append(i)
+        if (len(nodes) - 1) not in keyroots:
+            keyroots.append(len(nodes) - 1)
+        return sorted(keyroots)
+
+    keyroots1 = get_keyroots(nodes1, leftmost_leaf1)
+    keyroots2 = get_keyroots(nodes2, leftmost_leaf2)
+    
+    tree_dist = {}
+    
+    def treedist(i, j):
+        l_i = leftmost_leaf1[i]
+        l_j = leftmost_leaf2[j]
+        
+        fd = np.zeros((i - l_i + 2, j - l_j + 2))
+        
+        for x in range(1, i - l_i + 2):
+            fd[x, 0] = fd[x - 1, 0] + get_delete_cost(nodes1[l_i + x - 1])
+        for y in range(1, j - l_j + 2):
+            fd[0, y] = fd[0, y - 1] + get_insert_cost(nodes2[l_j + y - 1])
+            
+        for x in range(1, i - l_i + 2):
+            for y in range(1, j - l_j + 2):
+                n1_idx = l_i + x - 1
+                n2_idx = l_j + y - 1
+                
+                if leftmost_leaf1[n1_idx] == l_i and leftmost_leaf2[n2_idx] == l_j:
+                    cost_del = fd[x - 1, y] + get_delete_cost(nodes1[n1_idx])
+                    cost_ins = fd[x, y - 1] + get_insert_cost(nodes2[n2_idx])
+                    cost_ren = fd[x - 1, y - 1] + get_rename_cost(nodes1[n1_idx], nodes2[n2_idx])
+                    fd[x, y] = min(cost_del, cost_ins, cost_ren)
+                    tree_dist[(n1_idx, n2_idx)] = fd[x, y]
+                else:
+                    cost_del = fd[x - 1, y] + get_delete_cost(nodes1[n1_idx])
+                    cost_ins = fd[x, y - 1] + get_insert_cost(nodes2[n2_idx])
+                    p_i = leftmost_leaf1[n1_idx]
+                    p_j = leftmost_leaf2[n2_idx]
+                    cost_ren = fd[p_i - l_i, p_j - l_j] + tree_dist[(n1_idx, n2_idx)]
+                    fd[x, y] = min(cost_del, cost_ins, cost_ren)
+                    
+        return fd[i - l_i + 1, j - l_j + 1]
+
+    for i in keyroots1:
+        for j in keyroots2:
+            treedist(i, j)
+            
+    return tree_dist.get((len1 - 1, len2 - 1), 0.0)
+
+def verify_l2c2_continuity(coords_diff: Tuple[float, float], dom_diff: float, lipschitz_const: float = 10.0) -> bool:
+    """
+    Enforces the L2C2 spatially-local regularization constraint.
+    Ensures spatial mouse coordinate change is bounded by topological DOM structural edits.
+    d_spatial <= L * d_dom
+    """
+    d_spatial = np.hypot(coords_diff[0], coords_diff[1])
+    return d_spatial <= (lipschitz_const * dom_diff)

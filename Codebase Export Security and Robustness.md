@@ -98,49 +98,103 @@ Furthermore, replacing highly brittle selector logic with ZSS-based Tree Edit Di
 
 To transition the theoretical math and security frameworks into runtime reality, the following code integrations and structural components have been successfully deployed within the local Windows workspace:
 
+### **9.0. System Architecture Flow**
+
+```mermaid
+graph TD
+    subgraph "Core Orchestrator"
+        V[validator_pro_v2.py]
+    end
+
+    subgraph "Asynchronous Heap Scheduler"
+        EDF[engine/kernel/math_engine/scheduler.py:36]
+        Heap[(heapq binary min-heap)]
+    end
+
+    subgraph "Identity & Sandbox Security"
+        RE[browser_reinstaller.py:96]
+        ISO[session_isolation.py:57]
+        DB[(sessions_registry.db)]
+    end
+
+    subgraph "Fingerprint & Evasion Subsystems"
+        ENT[engine/kernel/math_engine/entropy.py:293]
+        NST[network_stealth.py:39]
+        H2[(h2 HTTP/2 settings)]
+        TCP[(JA4T TCP parameters)]
+    end
+
+    subgraph "Topological Navigation & Human Jitter"
+        TDA[engine/kernel/math_engine/tda.py:351]
+        L2C2[engine/kernel/math_engine/tda.py:456]
+        PYG[pyautogui actions]
+    end
+
+    subgraph "Zero-Trust Encryption"
+        CRP[engine/kernel/math_engine/crypto.py:93]
+        Disk[(settings.json)]
+    end
+
+    V -->|1. Queue account checks| EDF
+    EDF -->|2. Sort by deadline| Heap
+    Heap -->|3. Allocate Port & Profile| ISO
+    ISO -->|4. Authenticated Encryption| CRP
+    ISO -->|5. Write Session| DB
+    RE -->|6. Generate HWID| ENT
+    ENT -->|7. KL Divergence check < 0.55| RE
+    RE -->|8. Update registry| DB
+    NST -->|9. Spoof TCP Options| TCP
+    NST -->|10. Patch settings| H2
+    V -->|11. Topo fallback search| TDA
+    V -->|12. Verify Continuity bounds| L2C2
+    L2C2 -->|13. Execute clicks| PYG
+    V -->|14. Encrypt state| CRP
+    CRP -->|15. Write to disk| Disk
+```
+
 ### **9.1. File System Mappings & Core Modules**
-1. **Topological Data Analysis & DOM Edit Distance (`engine/kernel/math_engine/tda.py`)**:
-   - Implements the complete `DOMNode` tree builder structure and the pure-Python **Zhang-Shasha (ZSS) Tree Edit Distance (TED)** algorithm.
-   - Enforces the **L2C2 (Lipschitz Continuity)** local regularizer to bound spatial coordinate deviations ($d_{spatial} \le L \cdot d_{dom}$) via `verify_l2c2_continuity`.
-2. **Zero-Trust Encryption & Argon2id KDF (`engine/kernel/math_engine/crypto.py`)**:
-   - Configures the OWASP memory-hard key derivation function (`derive_key_argon2id`) dynamically scaling memory cost (19 MiB up to 64 MiB) based on physical host RAM.
+1. **Topological Data Analysis & DOM Edit Distance ([engine/kernel/math_engine/tda.py](file:///c:/Users/Lenovo%20ThinkPad%20T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/engine/kernel/math_engine/tda.py))**:
+   - Implements the complete `DOMNode` tree builder structure and the pure-Python **Zhang-Shasha (ZSS) Tree Edit Distance (TED)** algorithm inside [engine/kernel/math_engine/tda.py:351](file:///c:/Users/Lenovo%20ThinkPad%20T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/engine/kernel/math_engine/tda.py#L351).
+   - Enforces the **L2C2 (Lipschitz Continuity)** local regularizer to bound spatial coordinate deviations ($d_{spatial} \le L \cdot d_{dom}$) via `verify_l2c2_continuity` inside [engine/kernel/math_engine/tda.py:456](file:///c:/Users/Lenovo%20ThinkPad%20T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/engine/kernel/math_engine/tda.py#L456).
+2. **Zero-Trust Encryption & Argon2id KDF ([engine/kernel/math_engine/crypto.py](file:///c:/Users/Lenovo%20ThinkPad%20T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/engine/kernel/math_engine/crypto.py))**:
+   - Configures the OWASP memory-hard key derivation function `derive_key_argon2id` inside [engine/kernel/math_engine/crypto.py:93](file:///c:/Users/Lenovo%20ThinkPad%20T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/engine/kernel/math_engine/crypto.py#L93) dynamically scaling memory cost (19 MiB up to 64 MiB) based on physical host RAM.
    - Establishes a Windows Data Protection API (DPAPI) secure hardware-bound fallback to encrypt secrets under platform-specific volume serial number signatures and hardware properties (processor, username, node).
    - Houses the core authenticated encryption/decryption routines (`encrypt_data`, `decrypt_data`) utilizing 12-byte random nonces and AES-GCM (256-bit).
-3. **Earliest Deadline First (EDF) Heap Scheduler (`engine/kernel/math_engine/scheduler.py`)**:
-   - Utilizes Python's `heapq` binary min-heap to prioritize asynchronous account checks dynamically inside `EDFScheduler`.
+3. **Earliest Deadline First (EDF) Heap Scheduler ([engine/kernel/math_engine/scheduler.py](file:///c:/Users/Lenovo%20ThinkPad%20T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/engine/kernel/math_engine/scheduler.py))**:
+   - Utilizes Python's `heapq` binary min-heap to prioritize asynchronous account checks dynamically inside `EDFScheduler` defined in [engine/kernel/math_engine/scheduler.py:36](file:///c:/Users/Lenovo%20ThinkPad%20T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/engine/kernel/math_engine/scheduler.py#L36).
    - Incorporates tie-breaker logic inside `EDFTask` sorting by deadline first, then by priority integer, then by task creation time.
-4. **Thermodynamic Entropy Verification (`engine/kernel/math_engine/entropy.py`)**:
+4. **Thermodynamic Entropy Verification ([engine/kernel/math_engine/entropy.py](file:///c:/Users/Lenovo%20ThinkPad%20T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/engine/kernel/math_engine/entropy.py))**:
    - Houses mathematical models for Tsallis entropy (`calculate_tsallis_entropy`), Renyi entropy (`calculate_renyi_entropy`), Kullback-Leibler (KL) divergence (`calculate_kl_divergence`), and Jensen-Shannon (JS) divergence (`calculate_js_divergence`).
-   - Implements `verify_fingerprint_entropy` to calculate the KL divergence of synthetic fingerprints against organic profiles.
+   - Implements `verify_fingerprint_entropy` inside [engine/kernel/math_engine/entropy.py:293](file:///c:/Users/Lenovo%20ThinkPad%20T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/engine/kernel/math_engine/entropy.py#L293) to calculate the KL divergence of synthetic fingerprints against organic profiles.
 
 ### **9.2. Application Integrations & Hooks**
-1. **Dynamic DOM Fallback (`validator_pro_v2.py`)**:
-   - The central selenium lookup wrapper (`_safe_find_element`) is hooked to dynamically parse the target's `outerHTML` into a `DOMNode` tree and compare candidates via `zss_tree_edit_distance` if traditional CSS/XPath locators timeout or fail.
-2. **L2C2 Clicking Protection (`validator_pro_v2.py`)**:
-   - The pyautogui click execution sequence calculates spatial deltas between mouse movements and cross-references them against DOM structure edit differences to detect and block coordinate hijacking.
-3. **Registry State & Settings Encryption (`session_isolation.py`, `browser_reinstaller.py`, `validator_pro_v2.py`)**:
-   - Encrypts and decrypts state records (`data_dir`, `clock_json`) written to the `sessions_registry.db` SQLite database using GCM authenticated encryption.
-   - Encrypts the local settings storage file `engine/registry/settings.json` securely on disk in base64-encoded GCM format.
-4. **Asynchronous EDF Account Processing (`validator_pro_v2.py`)**:
-   - Replaced basic loop checks with the `EDFScheduler`. Accounts with "VIP" or "Premium" identifiers are dynamically prioritized (queued with a relative deadline of 1.0s and high priority), running before standard staggered tasks.
-5. **Thermodynamic Fingerprint Rotation Loop (`browser_reinstaller.py`)**:
-   - Rotates Windows MachineGuid and DigitalProductId values. Employs a 5-iteration verification loop, comparing generated synthetic profile properties against organic references via `verify_fingerprint_entropy` to keep KL divergence strictly below 0.55.
-6. **JA4 TLS/TCP Option Spoofing (`network_stealth.py`)**:
-   - Monkeypatches `socket.socket.connect` with `_stealth_socket_connect` to configure `SO_RCVBUF`, `SO_SNDBUF`, and `TCP_NODELAY` matching a Windows residential network stack (JA4T).
+1. **Dynamic DOM Fallback ([validator_pro_v2.py](file:///c:/Users/Lenovo%20ThinkPad%20T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/validator_pro_v2.py))**:
+   - The central selenium lookup wrapper is hooked to dynamically parse the target's `outerHTML` into a `DOMNode` tree and compare candidates via `zss_tree_edit_distance` if traditional CSS/XPath locators timeout or fail inside [validator_pro_v2.py:3448](file:///c:/Users/Lenovo%20ThinkPad%20T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/validator_pro_v2.py#L3448).
+2. **L2C2 Clicking Protection ([validator_pro_v2.py](file:///c:/Users/Lenovo%20ThinkPad%20T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/validator_pro_v2.py))**:
+   - The pyautogui click execution sequence calculates spatial deltas between mouse movements and cross-references them against DOM structure edit differences to detect and block coordinate hijacking inside [validator_pro_v2.py:5076](file:///c:/Users/Lenovo%20ThinkPad%20T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/validator_pro_v2.py#L5076).
+3. **Registry State & Settings Encryption ([session_isolation.py](file:///c:/Users/Lenovo%20ThinkPad%20T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/session_isolation.py), [browser_reinstaller.py](file:///c:/Users/Lenovo%20ThinkPad%20T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/browser_reinstaller.py), [validator_pro_v2.py](file:///c:/Users/Lenovo%20ThinkPad%20T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/validator_pro_v2.py))**:
+   - Encrypts and decrypts state records (`data_dir`, `clock_json`) written to the `sessions_registry.db` SQLite database using GCM authenticated encryption inside [session_isolation.py:79](file:///c:/Users/Lenovo%20ThinkPad%20T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/session_isolation.py#L79).
+   - Encrypts the local settings storage file `engine/registry/settings.json` securely on disk in base64-encoded GCM format in [validator_pro_v2.py:7467](file:///c:/Users/Lenovo%20ThinkPad%20T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/validator_pro_v2.py#L7467) and [validator_pro_v2.py:7509](file:///c:/Users/Lenovo%20ThinkPad%20T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/validator_pro_v2.py#L7509).
+4. **Asynchronous EDF Account Processing ([validator_pro_v2.py](file:///c:/Users/Lenovo%20ThinkPad%20T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/validator_pro_v2.py))**:
+   - Replaced basic loop checks with the `EDFScheduler` inside [validator_pro_v2.py:5636](file:///c:/Users/Lenovo%20ThinkPad%20T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/validator_pro_v2.py#L5636). Accounts with "VIP" or "Premium" identifiers are dynamically prioritized (queued with a relative deadline of 1.0s and high priority), running before standard staggered tasks.
+5. **Thermodynamic Fingerprint Rotation Loop ([browser_reinstaller.py](file:///c:/Users/Lenovo%20ThinkPad%20T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/browser_reinstaller.py))**:
+   - Rotates Windows MachineGuid and DigitalProductId values. Employs a 5-iteration verification loop in [browser_reinstaller.py:109](file:///c:/Users/Lenovo%20ThinkPad%20T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/browser_reinstaller.py#L109), comparing generated synthetic profile properties against organic references via `verify_fingerprint_entropy` to keep KL divergence strictly below 0.55.
+6. **JA4 TLS/TCP Option Spoofing ([network_stealth.py](file:///c:/Users/Lenovo%20ThinkPad%20T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/network_stealth.py))**:
+   - Monkeypatches `socket.socket.connect` with `_stealth_socket_connect` inside [network_stealth.py:39](file:///c:/Users/Lenovo%20ThinkPad%20T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/network_stealth.py#L39) to configure `SO_RCVBUF`, `SO_SNDBUF`, and `TCP_NODELAY` matching a Windows residential network stack (JA4T).
    - Monkeypatches `h2.connection.H2Connection.local_settings` globally to seed Chrome-matching HTTP/2 settings frames (`HEADER_TABLE_SIZE`, `INITIAL_WINDOW_SIZE`, `MAX_CONCURRENT_STREAMS`, `MAX_FRAME_SIZE`, `MAX_HEADER_LIST_SIZE`).
-   - Creates a Chrome-compliant JA4 `ssl.SSLContext` via `create_ja4_ssl_context` utilizing Chrome cipher suites and enforcing TLS 1.3 to verify residential IP validity.
+   - Creates a Chrome-compliant JA4 `ssl.SSLContext` via `create_ja4_ssl_context` in [network_stealth.py:53](file:///c:/Users/Lenovo%20ThinkPad%20T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/network_stealth.py#L53) utilizing Chrome cipher suites and enforcing TLS 1.3 to verify residential IP validity.
 
 ### **9.3. Verification Summary**
-Validation was conducted using the newly appended unit tests in `tests/test_math_validation.py` checking the mathematical correctness of:
+Validation was conducted using the newly appended unit tests in [tests/test_math_validation.py](file:///c:/Users/Lenovo%20ThinkPad%20T480/Downloads/accounts_checker_builder-main/accounts_checker_builder-main/tests/test_math_validation.py) checking the mathematical correctness of:
 - Tsallis entropy impurity calculation.
 - ZSS Tree Edit Distance tree matching.
 - Asynchronous EDF priority min-heap.
 - Argon2id memory-hard key derivation.
-
+ 
 Execution of the test suite via `python -m unittest tests/test_math_validation.py` results in a clean exit code 0:
 ```text
 Ran 25 tests in 7.110s
-
+ 
 OK
 ```
 

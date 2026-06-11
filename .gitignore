@@ -49,6 +49,7 @@ node_modules/
 *.sqlite3
 
 # ── Scratch / temp / debug files ─────────────────────────────────────────────
+codebase_export.md
 scratch/
 *.tmp
 *.bak

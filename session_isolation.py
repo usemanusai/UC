@@ -58,7 +58,12 @@ class SessionIsolationManager:
         """
         Generates and registers a unique port and data directory for a session.
         Uses optimistic WAL locking and logical Vector Clocks.
+        Enforces local hardware identity integrity checks.
         """
+        from engine.kernel.math_engine.crypto import verify_identity_integrity
+        if not verify_identity_integrity():
+            raise PermissionError("CRITICAL SYSTEM ALTERATION DETECTED: Hardware fingerprint mismatch. Aborting session creation.")
+
         data_dir = os.path.join(self.base_temp_dir, f"session_{session_id}")
         
         # Terminate any zombie Chrome processes using this directory first
@@ -117,6 +122,10 @@ class SessionIsolationManager:
 
     def cleanup_session(self, session_id: str):
         """Deletes registry records and clears session profile directory."""
+        from engine.kernel.math_engine.crypto import verify_identity_integrity
+        if not verify_identity_integrity():
+            raise PermissionError("CRITICAL SYSTEM ALTERATION DETECTED: Hardware fingerprint mismatch. Aborting session cleanup.")
+
         data_dir = os.path.join(self.base_temp_dir, f"session_{session_id}")
         
         def deregister_tx(conn: sqlite3.Connection):
@@ -147,6 +156,10 @@ class SessionIsolationManager:
 
     def purge_all(self):
         """Purges all sessions and resets database registry."""
+        from engine.kernel.math_engine.crypto import verify_identity_integrity
+        if not verify_identity_integrity():
+            raise PermissionError("CRITICAL SYSTEM ALTERATION DETECTED: Hardware fingerprint mismatch. Aborting session purging.")
+
         def clear_registry(conn: sqlite3.Connection):
             conn.execute("DELETE FROM state_registry;")
             

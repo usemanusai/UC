@@ -106,21 +106,25 @@ class BrowserReinstaller:
             return True
 
         try:
-            from engine.kernel.math_engine.entropy import verify_fingerprint_entropy
+            from engine.kernel.math_engine.entropy import (
+                vectorize_profile,
+                DirichletBayesianUpdater,
+                generate_stratified_reference,
+                check_two_sided_divergence,
+                load_telemetry_distributions
+            )
             import random
 
-            reference_profile = {
-                "MachineGuid": "8a38b1d9-5a1e-450f-90e8-0b2f5d14df90",
-                "DigitalProductId": "0000000000000000000000000000000000000000",
-                "OSVersion": "10.0.22631",
-                "ProcessorCount": "8"
-            }
+            updater = DirichletBayesianUpdater()
+            weights = updater.get_weights()
+            r_stratified = generate_stratified_reference(weights)
+            d1, d2, d3, d4 = load_telemetry_distributions()
 
             new_guid = None
             new_digital_id = None
 
-            # Find a generated fingerprint that satisfies the thermodynamic divergence constraint
-            for attempt in range(5):
+            # Find a generated fingerprint that satisfies the thermodynamic two-sided divergence constraints
+            for attempt in range(10):
                 temp_guid = str(uuid.uuid4())
                 temp_digital_id = os.urandom(164)
 
@@ -131,14 +135,17 @@ class BrowserReinstaller:
                     "ProcessorCount": str(random.choice([4, 8, 12, 16]))
                 }
 
-                is_valid, kl_div = verify_fingerprint_entropy(synthetic_profile, reference_profile, max_kl_threshold=0.55)
+                p_synthetic = vectorize_profile(synthetic_profile)
+                is_valid, kl_d4, kl_r = check_two_sided_divergence(
+                    p_synthetic, d4, r_stratified, theta_rejection=0.8, epsilon=0.5
+                )
                 if is_valid:
                     new_guid = temp_guid
                     new_digital_id = temp_digital_id
-                    logger.info(f"[Reinstaller] Synthetic HWID fingerprint validated successfully (KL Div: {kl_div:.4f}).")
+                    logger.info(f"[Reinstaller] Synthetic HWID fingerprint validated successfully (KL D4: {kl_d4:.4f}, KL R: {kl_r:.4f}).")
                     break
                 else:
-                    logger.warning(f"[Reinstaller] Fingerprint validation failed (KL Div: {kl_div:.4f} > 0.55). Retrying generation (attempt {attempt+1}/5)...")
+                    logger.warning(f"[Reinstaller] Fingerprint validation failed (KL D4: {kl_d4:.4f} <= 0.8 or KL R: {kl_r:.4f} >= 0.5). Retrying generation (attempt {attempt+1}/10)...")
 
             if not new_guid:
                 new_guid = str(uuid.uuid4())

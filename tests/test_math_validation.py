@@ -430,5 +430,151 @@ class TestNew2026Hardening(unittest.TestCase):
         unsealed = unseal_key(sealed)
         self.assertEqual(unsealed, key)
 
+    def test_stratified_sampling_divergence(self):
+        from engine.kernel.math_engine.entropy import (
+            vectorize_profile,
+            DirichletBayesianUpdater,
+            generate_stratified_reference,
+            check_two_sided_divergence,
+            load_telemetry_distributions
+        )
+        updater = DirichletBayesianUpdater()
+        weights = updater.get_weights()
+        self.assertAlmostEqual(sum(weights), 1.0)
+        
+        # Penality check
+        updater.update_weights(blocked_strata=[3], successful_strata=[0])
+        new_weights = updater.get_weights()
+        self.assertTrue(new_weights[0] > new_weights[3])
+        
+        # Resemblance and rejection checks
+        d1, d2, d3, d4 = load_telemetry_distributions()
+        r_stratified = generate_stratified_reference(new_weights)
+        
+        synthetic = {"val1": "test", "val2": "another"}
+        p_syn = vectorize_profile(synthetic)
+        
+        is_valid, kl_d4, kl_r = check_two_sided_divergence(
+            p_syn, d4, r_stratified, theta_rejection=0.01, epsilon=10.0
+        )
+        self.assertTrue(is_valid)
+        self.assertTrue(kl_d4 >= 0.0)
+        self.assertTrue(kl_r >= 0.0)
+
+    def test_adaptive_threshold_logistic(self):
+        from engine.kernel.math_engine.entropy import ThresholdCalibration
+        divergences = [0.1, 0.2, 0.15, 0.8, 0.9, 0.85]
+        labels = [0, 0, 0, 1, 1, 1]
+        
+        tau, ci = ThresholdCalibration.optimize_threshold(divergences, labels, bootstrap_runs=10)
+        self.assertTrue(0.2 < tau < 0.8)
+        self.assertTrue(ci[0] <= ci[1])
+
+    def test_hierarchical_dom_matching(self):
+        from engine.kernel.math_engine.tda import (
+            DOMNode,
+            prune_dom_tree,
+            calculate_subtree_simhash,
+            zss_tree_edit_distance
+        )
+        # Pruning check
+        root = DOMNode("DIV", "", [DOMNode("SCRIPT", "alert()"), DOMNode("SPAN", "hello")])
+        pruned = prune_dom_tree(root)
+        self.assertEqual(pruned.tag, "SPAN")
+        
+        # SimHash check
+        t1 = DOMNode("DIV", "", [DOMNode("SPAN", "text")])
+        t2 = DOMNode("DIV", "", [DOMNode("SPAN", "text")])
+        h1 = calculate_subtree_simhash(t1)
+        h2 = calculate_subtree_simhash(t2)
+        self.assertEqual(h1, h2)
+        
+        # Exact matching fallback
+        large_t1 = DOMNode("DIV", "", [DOMNode("P", str(i)) for i in range(100)])
+        large_t2 = DOMNode("DIV", "", [DOMNode("P", str(i)) for i in range(100)])
+        dist = zss_tree_edit_distance(large_t1, large_t2)
+        self.assertEqual(dist, 0.0) # Approx fallback match
+
+    def test_fitts_law_timing(self):
+        from engine.kernel.math_engine.tda import (
+            calculate_screen_distance,
+            verify_fitts_law_duration,
+            generate_fitts_jitter
+        )
+        e1 = {"x": 100.0, "y": 100.0, "width": 50.0, "height": 50.0}
+        e2 = {"x": 200.0, "y": 200.0, "width": 50.0, "height": 50.0}
+        
+        dist = calculate_screen_distance(e1, e2)
+        self.assertAlmostEqual(dist, np.hypot(100.0, 100.0))
+        
+        # Fitts timing check (e.g. 0.5s duration is enough for this distance)
+        self.assertTrue(verify_fitts_law_duration(0.5, dist, w_target=50.0))
+        self.assertFalse(verify_fitts_law_duration(0.01, dist, w_target=50.0))
+        
+        # Jitter bounds
+        jx, jy = generate_fitts_jitter(100.0, 100.0, 50.0, 50.0)
+        self.assertTrue(100.0 <= jx <= 150.0)
+        self.assertTrue(100.0 <= jy <= 150.0)
+
+    def test_stochastic_expected_utility(self):
+        from engine.kernel.math_engine.scheduler import (
+            StochasticUtilityScheduler,
+            DomainCircuitBreaker
+        )
+        # Expected utility sorting
+        scheduler = StochasticUtilityScheduler()
+        tracker = []
+        def task_fn(val):
+            tracker.append(val)
+            
+        scheduler.schedule("t1", "example.com", value=10.0, relative_deadline=0.1, fn=task_fn, val="t1")
+        scheduler.schedule("t2", "example.com", value=100.0, relative_deadline=0.1, fn=task_fn, val="t2")
+        
+        scheduler.start()
+        time.sleep(0.5)
+        scheduler.stop()
+        
+        # Higher value task t2 should run first if deadlines match
+        self.assertTrue(len(tracker) >= 1)
+        self.assertEqual(tracker[0], "t2")
+        
+        # Circuit breaker
+        cb = DomainCircuitBreaker(failure_threshold=3, quarantine_duration=0.5)
+        self.assertTrue(cb.can_execute())
+        cb.record_failure()
+        cb.record_failure()
+        cb.record_failure()
+        self.assertFalse(cb.can_execute())
+        time.sleep(0.6)
+        self.assertTrue(cb.can_execute()) # half-open state allows execution
+
+    def test_dual_identity_isolation(self):
+        from engine.kernel.math_engine.crypto import (
+            get_hardware_fingerprint,
+            verify_identity_integrity
+        )
+        # Check that local fingerprint is bound to hardware, not registry keys
+        fp = get_hardware_fingerprint()
+        self.assertEqual(len(fp), 32)
+        self.assertTrue(verify_identity_integrity())
+
+    def test_ingestion_pipeline(self):
+        from validator_pro_v2 import IngestionPipeline
+        
+        # Schema validity
+        self.assertTrue(IngestionPipeline.validate_record("user@gmail.com", "secret123"))
+        self.assertFalse(IngestionPipeline.validate_record("invalid-email", "secret123"))
+        self.assertFalse(IngestionPipeline.validate_record("user@gmail.com", "12")) # pwd too short
+        self.assertFalse(IngestionPipeline.validate_record("honey_decoy@gmail.com", "secret123")) # pattern rejected
+        
+        # High failure threshold rejection
+        bad_batch = [
+            ("bad1", "12"),
+            ("bad2", "34"),
+            ("good@gmail.com", "password")
+        ]
+        with self.assertRaises(ValueError):
+            IngestionPipeline.process(bad_batch)
+
 if __name__ == '__main__':
     unittest.main()

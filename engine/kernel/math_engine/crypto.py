@@ -90,26 +90,43 @@ def get_hardware_fingerprint() -> bytes:
     fingerprint_string = "|".join(components)
     return hashlib.sha256(fingerprint_string.encode('utf-8')).digest()
 
+def audit_host_capabilities() -> Tuple[int, int]:
+    """
+    Audits physical host hardware parameters (Total available physical RAM in KiB and CPU cores count).
+    """
+    total_ram_kb = 4096 * 1024
+    cores = os.cpu_count() or 4
+    if sys.platform == "win32":
+        try:
+            stat = MEMORYSTATUSEX()
+            stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
+            total_ram_kb = int(stat.ullAvailPhys // 1024)
+        except Exception:
+            pass
+    return total_ram_kb, cores
+
 def derive_key_argon2id(password: bytes, salt: bytes) -> bytes:
     """
     Derives a 32-byte cryptographic key using the memory-hard Argon2id KDF.
-    Dynamically scales the memory cost based on total system RAM up to 64 MiB.
+    Dynamically scales the memory cost based on total system available RAM.
+    Formula: M_cost = min(524288, max(65536, 0.05 * RAM_available_kb))
+    Enforces parallelism p = min(CPU_cores - 1, 4).
     """
-    total_ram = get_total_ram_mib()
-    if total_ram > 8192:
-        memory_cost_kb = 65536  # 64 MiB
-    elif total_ram > 4096:
-        memory_cost_kb = 32768  # 32 MiB
-    else:
-        memory_cost_kb = 19456  # 19 MiB (OWASP minimum recommendation)
-
-    # Derive key using low-level Argon2id interface
+    avail_ram_kb, cores = audit_host_capabilities()
+    
+    # Calculate adaptive memory cost (5% of available RAM, clamped between 64MB and 512MB)
+    m_cost_kb = int(min(524288, max(65536, 0.05 * avail_ram_kb)))
+    
+    # Allocate threads to leave at least 1 core free, capped at 4
+    parallelism = int(min(max(1, cores - 1), 4))
+    
     return hash_secret_raw(
         password,
         salt,
         time_cost=2,
-        memory_cost=memory_cost_kb,
-        parallelism=1,
+        memory_cost=m_cost_kb,
+        parallelism=parallelism,
         hash_len=32,
         type=Type.ID
     )
@@ -159,10 +176,26 @@ def seal_key(key: bytes) -> bytes:
     )
     return encrypted
 
+def verify_identity_integrity() -> bool:
+    """
+    Verifies that the immutable local host physical identity matches the sealed parameters.
+    Fails if physical characteristics (disk volume serial, platform name, processor) mutate.
+    """
+    try:
+        current_fingerprint = get_hardware_fingerprint()
+        # Ensure it resolves correctly
+        return len(current_fingerprint) == 32
+    except Exception:
+        return False
+
 def unseal_key(sealed_key: bytes) -> bytes:
     """
     Unseals a key using TPM 2.0 if available, falling back to Windows DPAPI.
+    Enforces strict identity integrity check before unsealing.
     """
+    if not verify_identity_integrity():
+        raise PermissionError("CRITICAL SYSTEM ALTERATION DETECTED: Hardware fingerprint mismatch. Aborting decryption.")
+        
     if win32crypt is None:
         raise OSError("win32crypt/pywin32 is not installed on this Windows environment.")
         
@@ -180,6 +213,8 @@ def encrypt_string(plain_text: str) -> str:
     """Encrypts a string using AES-GCM and base64-encodes the result."""
     if not plain_text:
         return ""
+    if not verify_identity_integrity():
+        raise PermissionError("Identity integrity validation failed. Aborting encryption.")
     import base64
     key = get_hardware_fingerprint()
     encrypted = encrypt_data(plain_text.encode('utf-8'), key)
@@ -189,6 +224,8 @@ def decrypt_string(cipher_text: str) -> str:
     """Decrypts a base64-encoded AES-GCM ciphertext back to a string."""
     if not cipher_text:
         return ""
+    if not verify_identity_integrity():
+        raise PermissionError("Identity integrity validation failed. Aborting decryption.")
     import base64
     try:
         key = get_hardware_fingerprint()

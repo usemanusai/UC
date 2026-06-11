@@ -27,7 +27,7 @@ except ImportError:
 
 from sklearn.cluster import DBSCAN
 from sklearn.decomposition import PCA
-from typing import Tuple, List, Dict, Any
+from typing import Tuple, List, Dict, Any, Optional
 
 def compute_persistence_homology(points: np.ndarray, max_edge_length: float = 1000.0) -> List[Tuple[int, Tuple[float, float]]]:
     """
@@ -341,6 +341,12 @@ def find_target_topologically(
 # ZSS DOM Tree Edit Distance & L2C2 Lipschitz Regularizer (2026 Standards)
 # =========================================================================
 
+# =========================================================================
+# ZSS DOM Tree Edit Distance & L2C2 Lipschitz Regularizer (2026 Standards)
+# =========================================================================
+
+import hashlib
+
 class DOMNode:
     """Represents a simplified node in the Document Object Model (DOM) tree."""
     def __init__(self, tag: str, text: str = "", children: List['DOMNode'] = None):
@@ -348,11 +354,98 @@ class DOMNode:
         self.text = text.strip()
         self.children = children or []
 
+def prune_dom_tree(root: DOMNode) -> Optional['DOMNode']:
+    """
+    Stage 1: DOM Pruning. Removes layout-only wrappers, script tags, style elements,
+    and comments, returning a clean semantic tree.
+    """
+    if root is None:
+        return None
+    ignored_tags = {"SCRIPT", "STYLE", "NOSCRIPT", "IFRAME", "HEAD", "META", "LINK", "COMMENT"}
+    if root.tag in ignored_tags:
+        return None
+    
+    pruned_children = []
+    for child in root.children:
+        p_child = prune_dom_tree(child)
+        if p_child is not None:
+            pruned_children.append(p_child)
+            
+    # Redundant wrapper elimination
+    if root.tag in ("DIV", "SPAN") and not root.text and len(pruned_children) == 1:
+        return pruned_children[0]
+        
+    # Drop empty nodes
+    if not root.text and not pruned_children and root.tag not in ("INPUT", "BUTTON", "A", "IMG", "SELECT", "OPTION"):
+        return None
+        
+    return DOMNode(root.tag, root.text, pruned_children)
+
+def calculate_subtree_simhash(node: DOMNode) -> int:
+    """Stage 2: Subtree SimHash. Computes a 64-bit SimHash of a DOM subtree."""
+    vector = np.zeros(64, dtype=int)
+    
+    def hash_to_bits(s: str) -> np.ndarray:
+        h = hashlib.md5(s.encode('utf-8')).digest()
+        val = int.from_bytes(h[:8], byteorder='big')
+        bits = np.array([(val >> i) & 1 for i in range(64)], dtype=int)
+        return np.where(bits == 1, 1, -1)
+        
+    features = [
+        f"tag:{node.tag}",
+        f"text:{node.text[:20]}" if node.text else "text:empty"
+    ]
+    for i, child in enumerate(node.children):
+        features.append(f"child_tag_{i}:{child.tag}")
+        
+    for feat in features:
+        vector += hash_to_bits(feat)
+        
+    for child in node.children:
+        c_sim = calculate_subtree_simhash(child)
+        c_bits = np.array([(c_sim >> i) & 1 for i in range(64)], dtype=int)
+        c_bits_weighted = np.where(c_bits == 1, 1, -1) * 2
+        vector += c_bits_weighted
+        
+    result = 0
+    for i in range(64):
+        if vector[i] > 0:
+            result |= (1 << i)
+    return result
+
+def count_tree_nodes(node: DOMNode) -> int:
+    return 1 + sum(count_tree_nodes(c) for c in node.children)
+
+def approximate_tree_edit_distance(t1: DOMNode, t2: DOMNode) -> float:
+    """Stage 4: Approximate fallback tree edit distance in O(N log N)."""
+    def get_paths(node: DOMNode, current_path: str = "") -> List[str]:
+        path = f"{current_path}/{node.tag}"
+        paths = [path]
+        for child in node.children:
+            paths.extend(get_paths(child, path))
+        return paths
+        
+    p1 = get_paths(t1)
+    p2 = get_paths(t2)
+    
+    from collections import Counter
+    c1 = Counter(p1)
+    c2 = Counter(p2)
+    
+    diff = (c1 - c2) + (c2 - c1)
+    total_elements = sum(diff.values())
+    return float(total_elements) / 2.0
+
 def zss_tree_edit_distance(t1: DOMNode, t2: DOMNode) -> float:
     """
-    Pure-Python implementation of the Zhang-Shasha (ZSS) Tree Edit Distance algorithm.
-    Computes distance between two DOMNode trees.
+    Zhang-Shasha (ZSS) Tree Edit Distance algorithm.
+    Falls back to approximate_tree_edit_distance if either tree exceeds 80 nodes.
     """
+    n1 = count_tree_nodes(t1)
+    n2 = count_tree_nodes(t2)
+    if n1 > 80 or n2 > 80:
+        return approximate_tree_edit_distance(t1, t2)
+
     def postorder(node, nodes, leftmost_leaf):
         children_indices = []
         for child in node.children:
@@ -453,6 +546,16 @@ def zss_tree_edit_distance(t1: DOMNode, t2: DOMNode) -> float:
             
     return tree_dist.get((len1 - 1, len2 - 1), 0.0)
 
+def calculate_screen_distance(e1_rect: Dict[str, float], e2_rect: Dict[str, float]) -> float:
+    """Computes screen Euclidean distance between bounding box centers."""
+    c1_x = e1_rect.get("x", 0.0) + e1_rect.get("width", 0.0) / 2.0
+    c1_y = e1_rect.get("y", 0.0) + e1_rect.get("height", 0.0) / 2.0
+    
+    c2_x = e2_rect.get("x", 0.0) + e2_rect.get("width", 0.0) / 2.0
+    c2_y = e2_rect.get("y", 0.0) + e2_rect.get("height", 0.0) / 2.0
+    
+    return float(np.hypot(c1_x - c2_x, c1_y - c2_y))
+
 def verify_l2c2_continuity(coords_diff: Tuple[float, float], dom_diff: float, lipschitz_const: float = 10.0) -> bool:
     """
     Enforces the L2C2 spatially-local regularization constraint.
@@ -461,3 +564,21 @@ def verify_l2c2_continuity(coords_diff: Tuple[float, float], dom_diff: float, li
     """
     d_spatial = np.hypot(coords_diff[0], coords_diff[1])
     return d_spatial <= (lipschitz_const * dom_diff)
+
+def verify_fitts_law_duration(duration: float, d_screen: float, w_target: float, a: float = 0.1, b: float = 0.15) -> bool:
+    """Verifies that the click duration satisfies Fitts's Law speed limits."""
+    if d_screen <= 0:
+        return True
+    w_eff = max(w_target, 1.0)
+    fitts_duration = a + b * np.log2((d_screen / w_eff) + 1.0)
+    return duration >= (fitts_duration * 0.75)
+
+def generate_fitts_jitter(x: float, y: float, w: float, h: float) -> Tuple[float, float]:
+    """Generates stochastic sub-pixel jitter micro-variations centered in target bounds."""
+    jitter_x = np.random.normal(0.0, 0.05) * w
+    jitter_y = np.random.normal(0.0, 0.05) * h
+    
+    jx = np.clip(jitter_x, -w/2.0 + 1.0, w/2.0 - 1.0)
+    jy = np.clip(jitter_y, -h/2.0 + 1.0, h/2.0 - 1.0)
+    
+    return x + w/2.0 + jx, y + h/2.0 + jy

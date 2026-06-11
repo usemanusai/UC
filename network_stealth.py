@@ -33,16 +33,30 @@ HTTP2_SETTINGS = {
 }
 HTTP2_WINDOW_UPDATE_DELTA = 15663105
 
+def get_spoofed_network_parameters() -> Dict[str, Any]:
+    """Generates dynamic network parameters using Gaussian Copula."""
+    try:
+        from engine.kernel.math_engine.entropy import synthesize_behavioral_fingerprint
+        return synthesize_behavioral_fingerprint()
+    except Exception:
+        return {
+            "tls_extension_count": 12,
+            "tcp_window_size": 64240,
+            "http2_max_frame_size": 16384,
+            "js_timing_latency_ms": 1.2
+        }
+
 # Patch the standard socket.socket class to inject JA4T TCP options
 _original_socket_connect = socket.socket.connect
 
 def _stealth_socket_connect(self, address):
     try:
+        params = get_spoofed_network_parameters()
+        tcp_win = params.get("tcp_window_size", 64240)
         # Set TCP window, buffers, and scaling parameters matching Windows residential kernel (JA4T)
-        self.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, HTTP2_SETTINGS["INITIAL_WINDOW_SIZE"])
+        self.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, tcp_win)
         self.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
         self.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        # Attempt to set window scaling/options where applicable
     except Exception:
         pass
     return _original_socket_connect(self, address)
@@ -53,6 +67,9 @@ socket.socket.connect = _stealth_socket_connect
 def create_ja4_ssl_context() -> ssl.SSLContext:
     """Creates a custom SSLContext with JA4-compliant Chrome TLS 1.3 ciphers."""
     context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+    
+    params = get_spoofed_network_parameters()
+    ext_count = params.get("tls_extension_count", 12)
     
     # Standard Chrome JA4 cipher suites list
     chrome_ciphers = [
@@ -65,6 +82,10 @@ def create_ja4_ssl_context() -> ssl.SSLContext:
         "AES128-GCM-SHA256",
         "AES256-GCM-SHA384",
     ]
+    # Dynamically alternate cipher list order based on TLS extension count entropy
+    if ext_count % 2 == 0:
+        chrome_ciphers = chrome_ciphers[::-1]
+        
     try:
         context.set_ciphers(":".join(chrome_ciphers))
     except Exception:

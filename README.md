@@ -65,41 +65,63 @@ UC is a fully automated account-checking tool designed for modern, high-security
 ```
 accounts_checker_builder-main/
 ├── validator_pro_v2.py          # Main entry point — GUI + orchestration
-├── chrome_extensions/           # CRX extension files loaded into every session
-│   ├── Reviews-rektCaptcha-reCaptcha-Solver.crx
-│   ├── Moodle-Eacads-Captcha-Solver-Chrome-Web-Store.crx
-│   └── Shaparak-Captcha-Solver-Chrome-Web-Store.crx
+├── _ext_unpacked/               # Unpacked Chrome extensions loaded dynamically at runtime
+│   ├── Reviews-rektCaptcha-reCaptcha-Solver_3d2008aa/     # rektCaptcha auto-solver extension
+│   ├── Moodle-Eacads-Captcha-Solver-Chrome-Web-Store_6a627938/ # Moodle CAPTCHA solver extension
+│   └── Shaparak-Captcha-Solver-Chrome-Web-Store_fdd1e877/     # Shaparak CAPTCHA solver extension
 ├── engine/
 │   ├── kernel/
 │   │   ├── browser_factory.py   # Chrome launch, retry logic, zombie cleanup
-│   │   ├── cleaner.py           # Browser close + profile cleanup
-│   │   ├── processor_v2.py      # Account processing pipeline
-│   │   ├── selector_discoverer.py  # AI-powered CSS selector discovery
-│   │   └── toolkit.py           # Shared utilities
+│   │   ├── heuristics.py        # 80+ CSS fallback heuristics & error patterns
+│   │   └── math_engine/         # Core 2026 mathematical hardening engine
+│   │       ├── crypto.py        # TPM 2.0 & DPAPI zero-trust credentials encryption
+│   │       ├── entropy.py       # Tsallis entropy & KL divergence fingerprint uniqueness validation
+│   │       ├── langevin.py      # Langevin trajectory modeling for human-mimicking cursor movement
+│   │       ├── scheduler.py     # Earliest Deadline First (EDF) heapq-based priority task scheduler
+│   │       ├── state.py         # Vector Clocks and lock-free DB concurrency helpers
+│   │       ├── tda.py           # Zhang-Shasha Tree Edit Distance & L2C2 continuity checks
+│   │       └── verification.py  # Z3 formal action verification and semantic analysis
 │   ├── core/
-│   │   ├── discovery_bridge.py  # Bridge between discovery + kernel
-│   │   └── discovery_schema.py  # Pydantic v2 schema definitions
-│   ├── integrations/
-│   └── registry/
-│       └── discovery_results.db # SQLite database of discovered selectors
+│   │   ├── cleanup_daemon.py    # Cleans zombie browser files and processes
+│   │   ├── discovery_bridge.py  # Bridge between discovery squad & local kernel
+│   │   ├── discovery_schema.py  # Pydantic schemas for AI discovery results
+│   │   └── proxy_worker.py      # Dynamic proxy rotator and crawler threads coordinator
+│   ├── registry/
+│   │   ├── configs/
+│   │   │   └── default.txt      # Default layout settings
+│   │   ├── settings.json        # Encrypted Tkinter UI configuration settings
+│   │   ├── settings.json.bak    # Backup of encrypted configuration settings
+│   │   ├── last_working_model.txt # Cached name of the last successful LLM model
+│   │   └── discovery_results.db # SQLite database of discovered/cached selectors
+│   └── reporting/
+│       ├── csv_exporter.py      # SQLite database log-to-CSV report generator
+│       └── test_csv_exporter.py # Unit tests for CSV log exporting
 ├── configs/                     # Pre-built site CSS selector presets (Gmail, Honey, Digiseller, Pastebin)
 ├── ai_captcha/                  # Claude AI-powered CAPTCHA solver and HTTP proxy bridge
 │   ├── claude_proxy_bridge.py   # OCR-based CAPTCHA resolver API bridge
-│   └── ocr_results.txt          # OCR cache file
+│   ├── test_claude_proxy_bridge.py # Unit tests for Claude proxy bridge
+│   ├── captcha_dispatcher.py    # Third-party CAPTCHA API routing hub
+│   ├── anticaptcha_api.py       # Anti-Captcha API wrapper
+│   ├── capsolver_api.py         # Capsolver API wrapper
+│   ├── twocaptcha_api.py        # 2Captcha API wrapper
+│   └── ocr_results.txt          # OCR cache file of solved CAPTCHAs
 ├── agents/                      # CrewAI orchestration and agent workflows
-│   └── free_browser_automation_enhancement_squad_v1_crewai-project/
-├── discovery_squad/             # Autonomous element discovery agents
+│   ├── free_browser_automation_enhancement_squad_v1_crewai-project/
+│   └── infrastructure/          # Supporting orchestration configurations
+├── agent-browser/               # Browser exploration/discovery skill module
+│   └── SKILL.md                 # Skill specification markdown
+├── discovery_squad/             # Headless TypeScript-based discovery agent
 ├── web-reader/                  # Web scanning and scraping skill module
 ├── web-search/                  # Google/DDG web search skill module
 ├── web-shader-extractor/        # Canvas and WebGL shader signature extractor
-├── browser_reinstaller.py       # One-click Chrome reinstall utility
+├── browser_reinstaller.py       # One-click Chrome reinstall utility and HWID spoofer
 ├── extension_configurator.py    # CDP-based extension runtime configurator
 ├── human_jitter.py              # Keystroke timing humanizer
 ├── locator.py                   # Cross-platform path resolver
 ├── network_stealth.py           # Network fingerprint stealth patches
-├── openrouter_client.py         # OpenRouter API wrapper
-├── session_isolation.py         # Per-account Chrome profile isolation
-├── tab_monitor.py               # Brute-force port scan and active tab monitor
+├── session_isolation.py         # Per-account Chrome profile isolation manager
+├── tab_monitor.py               # Active tab monitor and port scanner
+├── main_interface.py            # Legacy main launcher GUI (optional/obsolete)
 └── requirements.txt             # Python dependencies
 ```
 
@@ -641,10 +663,10 @@ The extractor maintains a library of signatures and patterns for known platforms
 
 ## Extensions & Solvers
 
-CRX extensions in `chrome_extensions/` are auto-extracted to `_ext_unpacked/` at runtime:
-1. `Reviews-rektCaptcha-reCaptcha-Solver.crx` (Auto-solves reCAPTCHA v2/v3).
-2. `Moodle-Eacads-Captcha-Solver-Chrome-Web-Store.crx` (Moodle captcha solver).
-3. `Shaparak-Captcha-Solver-Chrome-Web-Store.crx` (Shaparak payment solver).
+Chrome extensions are loaded directly from the pre-unpacked subdirectories under `_ext_unpacked/` at runtime:
+1. `Reviews-rektCaptcha-reCaptcha-Solver_3d2008aa` (Auto-solves reCAPTCHA v2/v3).
+2. `Moodle-Eacads-Captcha-Solver-Chrome-Web-Store_6a627938` (Moodle captcha solver).
+3. `Shaparak-Captcha-Solver-Chrome-Web-Store_fdd1e877` (Shaparak payment solver).
 
 ### rektCaptcha Auto-Patching
 To ensure captcha solving is always active, UC modifies `background.js` during extension extraction:
@@ -684,10 +706,10 @@ Users can also generate offline reports with the built-in **SQLite Log-to-CSV Re
 
 ## Configuration Files
 
-- `engine/registry/ai_config.json`: Model configurations.
-- `engine/registry/captcha_settings.json`: Solver parameters.
-- `engine/registry/settings.pkl`: Persisted GUI settings. This settings dictionary is persisted automatically (e.g., via pickle/JSON) to save and load Tkinter UI states (checkboxes, inputs) across restarts so that configured values are retained.
-- `engine/registry/configs/`: Directory containing prebuilt selector configurations:
+- `engine/registry/settings.json`: Persisted GUI settings (includes AI models, CAPTCHA solver settings, and custom workflows). Fully encrypted on disk using AES-GCM and DPAPI secure hardware-bound fallbacks, saving/loading Tkinter UI states across restarts securely.
+- `engine/registry/settings.json.bak`: Cryptographic backup of the GUI settings file, automatically rotated for atomic write protection.
+- `engine/registry/configs/default.txt`: Pre-warm preset mapping layout configuration.
+- `configs/`: Directory containing prebuilt selector configurations for target websites:
   - `my_digiseller_com.txt` (Digiseller login configuration)
   - `gmail_config.txt` (Gmail configuration)
   - `honey_config.txt` (Honey extension login configuration)

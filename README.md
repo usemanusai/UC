@@ -650,6 +650,9 @@ Each run creates a timestamped results directory containing:
 - `checked.db`: SQLite history database.
 - `screenshots/`: PNG screenshots of valid logins.
 
+
+Users can also view real-time metrics in the **Local-first Captcha Solver stats dashboard**, which visualizes success rates, failures, and average response times for all used captcha providers (e.g. Capsolver, 2Captcha, Local Claude Proxy) using an offline-first telemetry module. Access this via the `View Captcha Stats` button in the Configuration menu.
+
 Users can also generate offline reports with the built-in **SQLite Log-to-CSV Report Generator**. Use the `Export DB to CSV` button under the Configuration menu to easily share and review validation logs.
 
 ---

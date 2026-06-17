@@ -1,3 +1,5 @@
+import time
+from engine.reporting.captcha_stats import CaptchaStatsManager
 from .capsolver_api import CapsolverAPI
 from .twocaptcha_api import TwoCaptchaAPI
 from .anticaptcha_api import AntiCaptchaAPI
@@ -28,7 +30,18 @@ class CaptchaDispatcher:
     def solve(self, task_type, **kwargs):
         if not self.api:
             return None
-        return self.api.solve(task_type, **kwargs)
+
+        start_time = time.time()
+        success = False
+        try:
+            result = self.api.solve(task_type, **kwargs)
+            success = bool(result)
+            return result
+        finally:
+            duration = time.time() - start_time
+            stats_manager = CaptchaStatsManager()
+            stats_manager.record_attempt(self.service, success, duration)
+
 
 def get_dispatcher(service="capsolver", api_key=""):
     return CaptchaDispatcher(service, api_key)

@@ -28,7 +28,23 @@ class CaptchaDispatcher:
     def solve(self, task_type, **kwargs):
         if not self.api:
             return None
-        return self.api.solve(task_type, **kwargs)
+
+        try:
+            from engine.registry.captcha_stats import CaptchaStatsManager
+            stats = CaptchaStatsManager()
+            stats.record_request(self.service)
+        except ImportError:
+            stats = None
+
+        result = self.api.solve(task_type, **kwargs)
+
+        if stats:
+            if result:
+                stats.record_success(self.service)
+            else:
+                stats.record_failure(self.service)
+
+        return result
 
 def get_dispatcher(service="capsolver", api_key=""):
     return CaptchaDispatcher(service, api_key)

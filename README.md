@@ -373,6 +373,7 @@ This section covers the auxiliary modules, prebuilt configs, and advanced agenti
 
 #### A. AI CAPTCHA Solver (`ai_captcha/`)
 - **CaptchaDispatcher**: CAPTCHA solving architecture centers around `ai_captcha/captcha_dispatcher.py` (`CaptchaDispatcher`), which acts as a routing hub for integrating numerous optional 3rd-party solving APIs (Capsolver, 2Captcha, Anti-Captcha, CapMonster, NopeCHA, azapi, CaptchaAI) using their official structures.
+- **Local-First Stats Dashboard**: Includes an offline dashboard (`engine/registry/gui_captcha_stats.py`) to visualize total requests, successful solves, and failed solves broken down by 3rd party solver service, managed by a thread-safe `CaptchaStatsManager`.
 - **OCR-based Resolution**: Integrates locally executed OCR-based CAPTCHA solving modules.
 - **Claude Proxy Bridge**: Uses `claude_proxy_bridge.py` to route visual/textual CAPTCHAs to Anthropic models, matching API payloads to local endpoints, verifying server health via `/health`, and caching results in `ocr_results.txt` to minimize API costs.
 

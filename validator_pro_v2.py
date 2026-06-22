@@ -10529,6 +10529,13 @@ ttk.OptionMenu(frame_captcha_solvers, var_captcha_service, "capsolver", "capsolv
 ttk.Label(frame_captcha_solvers, text="API Key:").grid(column=2, row=0, padx=10, pady=5, sticky="e")
 ttk.Entry(frame_captcha_solvers, width=40, textvariable=var_captcha_api_key).grid(column=3, row=0, padx=10, pady=5, sticky="w")
 
+def open_captcha_stats_dashboard():
+    from engine.registry.gui_captcha_stats import CaptchaStatsDashboard
+    CaptchaStatsDashboard(window)
+
+btn_captcha_stats = ttk.Button(frame_captcha_solvers, text="📊 View Stats Dashboard", command=open_captcha_stats_dashboard)
+btn_captcha_stats.grid(column=0, row=1, columnspan=4, padx=10, pady=(5, 10), sticky="w")
+
 
 # --- Stealth: Cookie List Path ---
 ttk.Label(frame_stealth, text="Cookie List File:").grid(

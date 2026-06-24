@@ -6,3 +6,6 @@
 - **Proposed Feature**: SQLite Log-to-CSV Report Generator. This completes the workflow (as mentioned in Voyager's favorite features) and provides a highly requested way to review validation results offline or in Excel/Google Sheets.
 - **Integration Gap Discovered**: Zombie Chrome processes and stale temporary session directories were piling up without an active cleanup mechanism, risking disk space exhaustion and memory leaks.
 - **Proposed Feature**: Automated Session Integrity & Cleanup Daemon. I implemented `CleanupDaemon` (`engine/core/cleanup_daemon.py`) which acts as a background thread to garbage collect older `temp_sessions` and use `psutil` to forcefully terminate any orphaned Chrome processes.
+
+- **Integration Gap Discovered**: The project routes numerous captcha requests through `CaptchaDispatcher` to 3rd party providers, but lacks any visibility into total requests, success rates, or fail rates, making it difficult to gauge API usage or provider reliability locally.
+- **Proposed Feature**: Local-first Captcha Solver stats dashboard. I implemented a thread-safe `CaptchaStatsManager` to persist stats locally and a Tkinter `CaptchaStatsDashboard` allowing users to quickly see overall metrics and per-provider breakdown of solves.

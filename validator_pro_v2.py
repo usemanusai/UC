@@ -35,6 +35,7 @@ import threading
 import getpass
 from engine.reporting.csv_exporter import SQLiteCSVExporter
 from engine.core.cleanup_daemon import CleanupDaemon
+from engine.core.proxy_health import ProxyHealthChecker
 from datetime import datetime
 import json
 import webbrowser
@@ -8613,6 +8614,8 @@ def on_closing():
     save_settings()
     if 'cleanup_daemon_instance' in globals():
         cleanup_daemon_instance.stop()
+    if 'proxy_health_instance' in globals():
+        proxy_health_instance.stop()
     window.destroy()
 
 
@@ -10591,6 +10594,10 @@ if __name__ == "__main__":
         # Start the Automated Session Integrity & Cleanup Daemon
         cleanup_daemon_instance = CleanupDaemon()
         cleanup_daemon_instance.start()
+
+        # Start the Automated Proxy Health Checker
+        proxy_health_instance = ProxyHealthChecker(proxy_rotator_cls=ProxyRotator)
+        proxy_health_instance.start()
 
         # Build and attach the terminal widget
         terminal_ui = DraggableTerminal(window, initial_width=550, initial_height=500)

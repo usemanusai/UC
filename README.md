@@ -651,12 +651,13 @@ Supports multiple formats (`host:port`, `host:port:user:pass`, `socks5://host:po
 - **Random**: Assigns a random proxy per account.
 - **Single**: Applies one proxy for the entire run.
 
-### Dynamic Proxy Fetching
-UC features an **Automated Proxy Health Checker & Fetcher** (via `ProxySourceWorker`). When enabled:
+### Dynamic Proxy Fetching & Automated Health Checks
+UC features an **Automated Proxy Health Checker** (`ProxyHealthChecker`) and **Fetcher** (`ProxySourceWorker`). When enabled:
 - The UI accepts a `Proxy Source URL` and a configurable `Fetch Interval`.
 - A background daemon automatically fetches fresh proxy lists from the remote HTTP endpoint while validation is active.
 - A background daemon (`ProxySourceWorker` thread) automatically and periodically fetches fresh proxy rotators from configurable HTTP source URLs while validation is active.
 - Proxies are injected into the thread-safe `ProxyRotator` dynamically, preventing failures due to stale or dead proxy nodes midway through a large batch.
+- The background `ProxyHealthChecker` daemon constantly checks the loaded proxies in the `ProxyRotator` via fast socket connections, avoiding the overhead of making full HTTP requests and keeping the proxy list clean and healthy.
 
 ---
 

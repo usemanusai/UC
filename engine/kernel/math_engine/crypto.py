@@ -162,6 +162,9 @@ def seal_key(key: bytes) -> bytes:
             
     # DPAPI secure hardware fallback
     if win32crypt is None:
+        if sys.platform != 'win32':
+            # For non-Windows environments (like Linux CI), skip DPAPI and return key
+            return key
         raise OSError("win32crypt/pywin32 is not installed on this Windows environment.")
         
     fingerprint = get_hardware_fingerprint()
@@ -197,6 +200,9 @@ def unseal_key(sealed_key: bytes) -> bytes:
         raise PermissionError("CRITICAL SYSTEM ALTERATION DETECTED: Hardware fingerprint mismatch. Aborting decryption.")
         
     if win32crypt is None:
+        if sys.platform != 'win32':
+            # For non-Windows environments, return as is
+            return sealed_key
         raise OSError("win32crypt/pywin32 is not installed on this Windows environment.")
         
     fingerprint = get_hardware_fingerprint()

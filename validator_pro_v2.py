@@ -198,6 +198,7 @@ chromedriver_args = []
 # Supports both round-robin (Static Proxies) and random (Rotating Proxies) modes.
 # Dead proxies are automatically skipped after 3 consecutive failures.
 # =============================================================================
+from engine.core.proxy_health import ProxyHealthDaemon
 
 class ProxyRotator:
     """
@@ -228,6 +229,7 @@ class ProxyRotator:
     _index        : int    = 0
     _failures     : dict   = {}   # proxy_str -> consecutive_fail_count
     _instance_flag: bool   = False
+    _health_daemon = None
 
     @classmethod
     def load(cls, proxy_list: list, mode: str = "Static Proxies") -> None:
@@ -262,6 +264,16 @@ class ProxyRotator:
             cls._index    = 0
             cls._failures = {p: 0 for p in validated}
             cls._instance_flag = True
+
+            # Restart health daemon
+            if cls._health_daemon:
+                cls._health_daemon.stop()
+                cls._health_daemon.join(timeout=1.0)
+
+            if validated:
+                cls._health_daemon = ProxyHealthDaemon(cls)
+                cls._health_daemon.start()
+
             _log = logging.getLogger('validator_pro_v2.ProxyRotator')
             _log.info(f"[ProxyRotator] Loaded {len(validated)} valid proxies (mode={mode}).")
 

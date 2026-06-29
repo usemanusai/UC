@@ -35,6 +35,7 @@ import threading
 import getpass
 from engine.reporting.csv_exporter import SQLiteCSVExporter
 from engine.core.cleanup_daemon import CleanupDaemon
+from engine.core.proxy_health import ProxyHealthDaemon
 from datetime import datetime
 import json
 import webbrowser
@@ -5833,6 +5834,19 @@ def check_accounts_logic(
         except Exception as e:
             print_action(f"{Fore.RED}[Dynamic Proxy] Failed to start ProxySourceWorker: {e}{Style.RESET_ALL}")
 
+    proxy_health_daemon = None
+    if proxy_enabled:
+        try:
+            proxy_health_daemon = ProxyHealthDaemon(
+                proxy_rotator_cls=ProxyRotator,
+                check_interval=30,
+                timeout=2
+            )
+            proxy_health_daemon.start()
+            print_action(f"{Fore.CYAN}[Proxy Health] Started ProxyHealthDaemon to monitor proxy pool.{Style.RESET_ALL}")
+        except Exception as e:
+            print_action(f"{Fore.RED}[Proxy Health] Failed to start ProxyHealthDaemon: {e}{Style.RESET_ALL}")
+
     try:
         from engine.kernel.math_engine.scheduler import EDFScheduler
         scheduler = EDFScheduler()
@@ -6182,6 +6196,9 @@ def check_accounts_logic(
         if proxy_worker:
             proxy_worker.stop()
             print_action(f"{Fore.CYAN}[Dynamic Proxy] Stopped ProxySourceWorker.{Style.RESET_ALL}")
+        if proxy_health_daemon:
+            proxy_health_daemon.stop()
+            print_action(f"{Fore.CYAN}[Proxy Health] Stopped ProxyHealthDaemon.{Style.RESET_ALL}")
 
 
 def run_account_checks(

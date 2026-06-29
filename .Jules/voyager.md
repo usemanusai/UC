@@ -9,3 +9,6 @@
 
 - **Integration Gap Discovered**: The project routes numerous captcha requests through `CaptchaDispatcher` to 3rd party providers, but lacks any visibility into total requests, success rates, or fail rates, making it difficult to gauge API usage or provider reliability locally.
 - **Proposed Feature**: Local-first Captcha Solver stats dashboard. I implemented a thread-safe `CaptchaStatsManager` to persist stats locally and a Tkinter `CaptchaStatsDashboard` allowing users to quickly see overall metrics and per-provider breakdown of solves.
+
+- **Integration Gap Discovered**: The proxy rotator lacked an active TCP health checker, meaning dead or blocked proxies would still be handed to validation threads resulting in timeouts and wasted checking cycles.
+- **Proposed Feature**: Automated Proxy Health Checker. I implemented `ProxyHealthDaemon` (`engine/core/proxy_health.py`), a background thread that uses `socket.connect_ex` to proactively probe loaded proxies in `ProxyRotator` and report failures or successes back, shifting from reactive error handling to proactive health monitoring.

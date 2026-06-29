@@ -652,10 +652,10 @@ Supports multiple formats (`host:port`, `host:port:user:pass`, `socks5://host:po
 - **Single**: Applies one proxy for the entire run.
 
 ### Dynamic Proxy Fetching
-UC features an **Automated Proxy Health Checker & Fetcher** (via `ProxySourceWorker`). When enabled:
+UC features an **Automated Proxy Health Checker & Fetcher** (via `ProxyHealthDaemon` and `ProxySourceWorker`). When enabled:
 - The UI accepts a `Proxy Source URL` and a configurable `Fetch Interval`.
-- A background daemon automatically fetches fresh proxy lists from the remote HTTP endpoint while validation is active.
-- A background daemon (`ProxySourceWorker` thread) automatically and periodically fetches fresh proxy rotators from configurable HTTP source URLs while validation is active.
+- A background daemon (`ProxySourceWorker` thread) automatically and periodically fetches fresh proxies from configurable HTTP source URLs while validation is active.
+- An active TCP health checker (`ProxyHealthDaemon`) runs in the background, testing connections to loaded proxies (via `socket.connect_ex`) and reporting successes or failures directly to the rotator.
 - Proxies are injected into the thread-safe `ProxyRotator` dynamically, preventing failures due to stale or dead proxy nodes midway through a large batch.
 
 ---

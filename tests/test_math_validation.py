@@ -12,6 +12,7 @@ import sqlite3
 import time
 import numpy as np
 import site
+from unittest.mock import patch, MagicMock
 
 # Enable user site packages
 site.ENABLE_USER_SITE = True
@@ -400,7 +401,10 @@ class TestNew2026Hardening(unittest.TestCase):
         self.assertEqual(first, "early")
         self.assertEqual(second, "late")
 
-    def test_argon2id_kdf_derivation(self):
+    @patch('engine.kernel.math_engine.crypto.win32crypt')
+    @patch('engine.kernel.math_engine.crypto.get_hardware_fingerprint')
+    @patch('engine.kernel.math_engine.crypto.verify_identity_integrity')
+    def test_argon2id_kdf_derivation(self, mock_verify_identity, mock_get_hardware_fingerprint, mock_win32crypt):
         from engine.kernel.math_engine.crypto import (
             derive_key_argon2id,
             seal_key,
@@ -409,6 +413,8 @@ class TestNew2026Hardening(unittest.TestCase):
             decrypt_data
         )
         
+        mock_verify_identity.return_value = True
+
         password = b"securepwd123"
         salt = b"unique_salt_1234"
         
@@ -423,7 +429,10 @@ class TestNew2026Hardening(unittest.TestCase):
         decrypted = decrypt_data(ciphertext, key)
         self.assertEqual(decrypted, secret_message)
         
-        # Test DPAPI sealing/unsealing
+        # Mock DPAPI sealing/unsealing
+        mock_win32crypt.CryptProtectData.return_value = b"mock_sealed_" + key
+        mock_win32crypt.CryptUnprotectData.return_value = (None, key)
+
         sealed = seal_key(key)
         self.assertTrue(len(sealed) > 0)
         

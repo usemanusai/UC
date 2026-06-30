@@ -6,6 +6,7 @@ Z3 formal verification, Vector Clocks, and structural entropy.
 """
 
 import unittest
+import unittest.mock
 import os
 import tempfile
 import sqlite3
@@ -400,7 +401,12 @@ class TestNew2026Hardening(unittest.TestCase):
         self.assertEqual(first, "early")
         self.assertEqual(second, "late")
 
-    def test_argon2id_kdf_derivation(self):
+    @unittest.mock.patch('engine.kernel.math_engine.crypto.win32crypt')
+    def test_argon2id_kdf_derivation(self, mock_win32crypt):
+        # Mock win32crypt for headless Linux environment tests
+        mock_win32crypt.CryptProtectData.side_effect = lambda key, desc, entropy, res, prompt, flags: b"SEALED_" + key
+        mock_win32crypt.CryptUnprotectData.side_effect = lambda sealed, entropy, res, prompt, flags: (None, sealed.replace(b"SEALED_", b""))
+
         from engine.kernel.math_engine.crypto import (
             derive_key_argon2id,
             seal_key,
